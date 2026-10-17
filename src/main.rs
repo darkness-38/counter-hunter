@@ -64,6 +64,11 @@ struct Cli {
 
 fn parse_target(s: &str) -> TargetConjecture {
     match s.to_lowercase().replace('_', "-").as_str() {
+        // Prize Problem Ledger (PPL) and Bounty Targets
+        "ppl013" | "ppl013-fib-catalan" | "fib-catalan" | "catalan" => TargetConjecture::Ppl013FibCatalan,
+        "ppl094" | "ppl094-pell" | "pell" => TargetConjecture::Ppl094Pell,
+        "sun-2x-32y" | "2x-32y" | "sun-power2" => TargetConjecture::Sun2x32y,
+
         // Zhi-Wei Sun Primary Conjectures (Ordinary Primes)
         "sun-prize-2a5b" | "sun-prize" | "prize" | "2a-5b" | "power-2a-5b" => TargetConjecture::SunPrize2a5b,
         "power" | "power-2a-3b" | "sun-power" | "a-power" => TargetConjecture::SunPower2a3b,
@@ -157,6 +162,9 @@ fn main() {
     if cli.run_all {
         println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ZHI-WEI SUN CORE CONJECTURES <<<\x1b[0m\n");
         let targets = [
+            TargetConjecture::Ppl013FibCatalan,
+            TargetConjecture::Ppl094Pell,
+            TargetConjecture::Sun2x32y,
             TargetConjecture::SunPrize2a5b,
             TargetConjecture::SunPower2a3b,
             TargetConjecture::SunCubic2X3Y4,

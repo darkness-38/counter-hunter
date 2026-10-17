@@ -31,6 +31,12 @@ pub enum TargetConjecture {
     SunPower2a3b,
     /// 7. sun-prize-2a5b: n = p + 2^a + 5^b (a >= 1, b >= 0, p odd prime, even n) - Zhi-Wei Sun's $100 Prize Conjecture
     SunPrize2a5b,
+    /// 8. ppl013-fib-catalan: n = p + F_s + C_t (s >= 2, t >= 1, p odd prime, odd n) - $200 Prize (PPL 013)
+    Ppl013FibCatalan,
+    /// 9. ppl094-pell: n = p + P_x + 2P_y (x >= 2 even, y >= 1, p odd prime, odd n) - $100 Prize (PPL 094)
+    Ppl094Pell,
+    /// 10. sun-2x-32y: n = p + 2^x + 3*2^y (x >= 1, y >= 1, p odd prime, odd n) - Sun's Strong 2-Power Conjecture
+    Sun2x32y,
 
     // === LEGACY BRUTE-FORCE TARGETS ===
     SunTwinPrime,
@@ -76,6 +82,9 @@ impl TargetConjecture {
             Self::Erdos2a2bTwin => "Target 5: erdos-2a-2b-twin (n = p + 2^a + 2^b, p twin prime, n ≡ 5 mod 6)",
             Self::SunPower2a3b => "Sun's Original Power-Prime Conjecture (n = p + 2^a + 3^b, p prime, even n)",
             Self::SunPrize2a5b => "Sun's $100 Prize Conjecture on Powers of 2 and 5 (n = p + 2^a + 5^b, p odd prime, even n)",
+            Self::Ppl013FibCatalan => "PPL 013: Hou & Zeng / Sun Fibonacci + Catalan ($200 Prize) (n = p + F_s + C_t, odd n)",
+            Self::Ppl094Pell => "PPL 094: Zhi-Wei Sun Pell Number Representation ($100 Prize) (n = p + P_x + 2P_y, odd n)",
+            Self::Sun2x32y => "Sun's Strong Power-of-Two Conjecture (n = p + 2^x + 3*2^y, odd n)",
 
             Self::SunTwinPrime => "Target A1: Sun's Twin-Prime Power Conjecture (n = p + 2^a + 3^b)",
             Self::SunSophieGermain => "Target A2: Sun's Sophie-Germain Power Conjecture (n = p + 2^a + 3^b)",
@@ -96,6 +105,9 @@ impl TargetConjecture {
             Self::Erdos2a2bTwin => "erdos-2a-2b-twin",
             Self::SunPower2a3b => "power-2a-3b",
             Self::SunPrize2a5b => "sun-prize-2a5b",
+            Self::Ppl013FibCatalan => "ppl013-fib-catalan",
+            Self::Ppl094Pell => "ppl094-pell",
+            Self::Sun2x32y => "sun-2x-32y",
 
             Self::SunTwinPrime => "a-twin",
             Self::SunSophieGermain => "a-sophie",
@@ -113,6 +125,9 @@ impl TargetConjecture {
             Self::Binom2aPrime
             | Self::SunPower2a3b
             | Self::SunPrize2a5b
+            | Self::Ppl013FibCatalan
+            | Self::Ppl094Pell
+            | Self::Sun2x32y
             | Self::SunCubic2X3Y4
             | Self::SunCubicX32Y3
             | Self::SunCentralBinomial
@@ -132,7 +147,10 @@ impl TargetConjecture {
     /// Base modulus and allowed residue classes.
     pub fn base_modulus_and_residues(&self) -> (u64, Vec<u64>) {
         match self {
-            Self::Binom2aPrime => (2, vec![1]),
+            Self::Binom2aPrime
+            | Self::Ppl013FibCatalan
+            | Self::Ppl094Pell
+            | Self::Sun2x32y => (2, vec![1]),
             Self::Binom2aTwin => (6, vec![5]),
             Self::Twin2a3b | Self::Sophie2a3b => (6, vec![0, 4]),
             Self::Erdos2a2bTwin => (6, vec![5]),
@@ -155,6 +173,9 @@ impl TargetConjecture {
     pub fn is_valid_candidate(&self, n: u64) -> bool {
         match self {
             Self::Binom2aPrime => n > 4 && n % 2 == 1,
+            Self::Ppl013FibCatalan => n > 4 && n % 2 == 1,
+            Self::Ppl094Pell => n > 5 && n % 2 == 1,
+            Self::Sun2x32y => n > 10 && n % 2 == 1,
             Self::Binom2aTwin => n > 4 && n % 6 == 5,
             Self::Twin2a3b | Self::Sophie2a3b => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
             Self::Erdos2a2bTwin => n > 4 && n % 6 == 5,
@@ -241,6 +262,84 @@ impl TargetConjecture {
                         }
                     }
                     a += 1;
+                }
+            }
+
+            Self::Ppl013FibCatalan => {
+                // s = F_s + C_t (s >= 2, t >= 1, even sum)
+                let fibs = generate_fibonacci(max_shift);
+                let cats = generate_catalan(max_shift);
+                for &f in &fibs {
+                    if f >= max_shift {
+                        break;
+                    }
+                    for &c in &cats {
+                        if (f + c) % 2 == 0 {
+                            if let Some(sum) = f.checked_add(c) {
+                                if sum <= max_shift {
+                                    shifts.push(sum);
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Self::Ppl094Pell => {
+                // s = P_x + 2*P_y (x >= 2 even, y >= 1)
+                let pell = generate_pell(max_shift);
+                for x in (2..pell.len()).step_by(2) {
+                    let px = pell[x];
+                    if px >= max_shift {
+                        break;
+                    }
+                    for &py in pell.iter().skip(1) {
+                        if let Some(py2) = py.checked_mul(2) {
+                            if let Some(sum) = px.checked_add(py2) {
+                                if sum <= max_shift {
+                                    shifts.push(sum);
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Self::Sun2x32y => {
+                // s = 2^x + 3*2^y (x >= 1, y >= 1)
+                let mut x = 1u32;
+                while let Some(p2x) = 1u64.checked_shl(x) {
+                    if p2x >= max_shift {
+                        break;
+                    }
+                    let mut y = 1u32;
+                    while let Some(p2y) = 1u64.checked_shl(y) {
+                        if let Some(val3) = p2y.checked_mul(3) {
+                            if let Some(sum) = p2x.checked_add(val3) {
+                                if sum <= max_shift {
+                                    shifts.push(sum);
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                        y += 1;
+                    }
+                    x += 1;
                 }
             }
 
@@ -619,6 +718,45 @@ pub fn generate_lucas(limit: u64) -> Vec<u64> {
     lucas
 }
 
+/// Generates Catalan numbers up to `limit` (C_1=1, C_2=2, C_3=5, C_4=14, ...).
+pub fn generate_catalan(limit: u64) -> Vec<u64> {
+    let mut cats = Vec::new();
+    let mut c = 1u128;
+    let mut t = 1u64;
+    loop {
+        if c > limit as u128 {
+            break;
+        }
+        cats.push(c as u64);
+        let next_c = c.checked_mul(2 * (2 * t + 1) as u128)
+            .map(|v| v / (t + 2) as u128);
+        match next_c {
+            Some(val) if val <= u64::MAX as u128 => {
+                c = val;
+                t += 1;
+            }
+            _ => break,
+        }
+    }
+    cats
+}
+
+/// Generates Pell numbers up to `limit` (P_0=0, P_1=1, P_2=2, P_3=5, P_4=12, ...).
+pub fn generate_pell(limit: u64) -> Vec<u64> {
+    let mut pell = vec![0, 1, 2];
+    let mut p0 = 1u64;
+    let mut p1 = 2u64;
+    while let Some(next_p) = p1.checked_mul(2).and_then(|v| v.checked_add(p0)) {
+        pell.push(next_p);
+        if next_p >= limit {
+            break;
+        }
+        p0 = p1;
+        p1 = next_p;
+    }
+    pell
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,8 +779,23 @@ mod tests {
     }
 
     #[test]
+    fn test_catalan_numbers() {
+        let cats = generate_catalan(500);
+        assert_eq!(&cats[..7], &[1, 2, 5, 14, 42, 132, 429]);
+    }
+
+    #[test]
+    fn test_pell_numbers() {
+        let pell = generate_pell(500);
+        assert_eq!(&pell[..7], &[0, 1, 2, 5, 12, 29, 70]);
+    }
+
+    #[test]
     fn test_preflight_checks() {
         let targets = [
+            (TargetConjecture::Ppl013FibCatalan, true),
+            (TargetConjecture::Ppl094Pell, true),
+            (TargetConjecture::Sun2x32y, true),
             (TargetConjecture::SunPrize2a5b, true),
             (TargetConjecture::SunPower2a3b, true),
             (TargetConjecture::SunCubic2X3Y4, true),
