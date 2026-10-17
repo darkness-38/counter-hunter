@@ -49,6 +49,10 @@ struct Cli {
     #[arg(long = "parity", default_value = "default")]
     parity: String,
 
+    /// Live telemetry reporting interval in seconds (default: 5)
+    #[arg(long = "telemetry-interval", default_value = "5")]
+    telemetry_interval: u64,
+
     /// Number of worker threads (default: 0 = Rayon auto-detect all cores)
     #[arg(short = 'j', long = "threads", default_value = "0")]
     threads: usize,
@@ -115,59 +119,33 @@ fn run_hunt_for_target(target: TargetConjecture, cli: &Cli) {
         max_counterexamples: cli.max_counterexamples,
         parity,
         num_threads: cli.threads,
+        telemetry_interval_secs: cli.telemetry_interval,
         verbose: cli.verbose,
         output_file: cli.output.clone(),
     };
 
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1;32m🚀 COUNTER-HUNTER — High-Throughput Bit-Parallel Number Theory Engine\x1b[0m");
-    println!("   Zhi-Wei Sun & Paul Erdős Open Conjectures Hunter");
+    println!("   Zhi-Wei Sun & Paul Erdős Open Conjectures Hunter (Lock-Free Multi-Core)");
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1m🎯 Target Conjecture :\x1b[0m \x1b[1;33m{}\x1b[0m", target.name());
     println!("\x1b[1m🔍 Search Space     :\x1b[0m {} .. {}", format_number(cli.start), format_number(cli.end));
     println!("\x1b[1m⚡ Segment Size     :\x1b[0m {} numbers ({:.1} MB bitset)", cli.segment_size, cli.segment_size as f64 / 8.0 / 1024.0 / 1024.0);
     println!("\x1b[1m🛡️ Sieve Margin     :\x1b[0m {} numbers ({:.1} MB)", cli.margin, cli.margin as f64 / 8.0 / 1024.0 / 1024.0);
-    println!("\x1b[1m🧵 Threading Engine :\x1b[0m {} workers (Rayon parallel scheduler)", if cli.threads == 0 { "All available cores".to_string() } else { cli.threads.to_string() });
+    println!("\x1b[1m🧵 Threading Engine :\x1b[0m {} workers (Lock-free atomic work stealing)", if cli.threads == 0 { "All available cores".to_string() } else { cli.threads.to_string() });
+    println!("\x1b[1m📡 Telemetry Pulse  :\x1b[0m Every {}s (heartbeat monitor)", cli.telemetry_interval);
     println!("\x1b[1m📁 Proof Log File   :\x1b[0m {}", cli.output);
     println!("\x1b[1;36m================================================================================\x1b[0m");
 
-    let total_nums = cli.end.saturating_sub(cli.start);
     let start_time = Instant::now();
-
     let hunter = Hunter::new(config);
-    hunter.hunt(|seg_start, seg_end, gnums_per_sec, stats| {
-        let scanned = stats.numbers_scanned.load(Ordering::Relaxed);
-        let candidates = stats.candidates_tested.load(Ordering::Relaxed);
-        let counterexamples = stats.counterexamples_found.load(Ordering::Relaxed);
-        let progress_pct = if total_nums > 0 {
-            (scanned as f64 / total_nums as f64) * 100.0
-        } else {
-            100.0
-        };
-        let elapsed = start_time.elapsed();
-        let elapsed_secs = elapsed.as_secs();
-        let mins = elapsed_secs / 60;
-        let secs = elapsed_secs % 60;
-
-        println!(
-            "\x1b[1;34m[SEGMENT DONE]\x1b[0m [{:>11} .. {:>11}] | \x1b[1mScanned:\x1b[0m {:>6.2} M / {:>6.2} M ({:>5.1}%) | \x1b[1;32mSpeed:\x1b[0m {:>6.3} Gnums/s | \x1b[1mElapsed:\x1b[0m {:02}m{:02}s | \x1b[1mCandidates:\x1b[0m {} | \x1b[1;31mCounterexamples:\x1b[0m {}",
-            seg_start,
-            seg_end,
-            scanned as f64 / 1e6,
-            total_nums as f64 / 1e6,
-            progress_pct,
-            gnums_per_sec,
-            mins,
-            secs,
-            candidates,
-            counterexamples
-        );
-    });
+    hunter.hunt();
 
     let total_elapsed = start_time.elapsed().as_secs_f64();
     let total_scanned = hunter.stats.numbers_scanned.load(Ordering::Relaxed);
     let total_candidates = hunter.stats.candidates_tested.load(Ordering::Relaxed);
     let total_counterexamples = hunter.stats.counterexamples_found.load(Ordering::Relaxed);
+    let total_l1_blocks = hunter.stats.l1_blocks_processed.load(Ordering::Relaxed);
     let overall_speed = if total_elapsed > 0.0 {
         (total_scanned as f64) / (total_elapsed * 1e9)
     } else {
@@ -177,8 +155,9 @@ fn run_hunt_for_target(target: TargetConjecture, cli: &Cli) {
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1;32m🏁 HUNT COMPLETED for {}\x1b[0m", target.short_code());
     println!("   Total Integers Scanned   : {}", total_scanned);
-    println!("   Average Throughput       : \x1b[1;32m{:.3} Giga-integers / second\x1b[0m", overall_speed);
+    println!("   Average Throughput       : \x1b[1;32m{:.3} Giga-integers / second\x1b[0m ({:.1} Mnums/s)", overall_speed, overall_speed * 1000.0);
     println!("   Total Time Elapsed       : {:.2} seconds", total_elapsed);
+    println!("   L1 Cache 32 KiB Blocks   : {}", total_l1_blocks);
     println!("   Candidates Filtered      : {}", total_candidates);
     println!("   Counterexamples Verified : \x1b[1;31m{}\x1b[0m", total_counterexamples);
     println!("\x1b[1;36m================================================================================\x1b[0m\n");

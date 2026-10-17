@@ -414,19 +414,25 @@ impl CounterexampleReport {
 /// If all `n - s` are composite: returns `Some(CounterexampleReport)` containing the SPF
 /// and full prime factorization of each difference as mathematical proof.
 pub fn verify_counterexample(n: u64, forbidden_diffs: &[u64]) -> Option<CounterexampleReport> {
-    let mut analyses = Vec::new();
+    // Phase 1: Ultra-fast Zero-Division Primality Screening
+    // If ANY difference is prime, candidate is represented -> instant nanosecond exit!
+    for &s in forbidden_diffs {
+        if s >= n {
+            continue;
+        }
+        if is_prime_fast(n - s) {
+            return None;
+        }
+    }
 
+    // Phase 2: Genuine Counterexample Confirmed!
+    // Compute smallest prime factor (SPF) and full factorization for each difference.
+    let mut analyses = Vec::new();
     for &s in forbidden_diffs {
         if s >= n {
             continue;
         }
         let diff = n - s;
-
-        // If any difference is prime, n has a valid representation!
-        if is_prime_fast(diff) {
-            return None;
-        }
-
         let spf = smallest_prime_factor(diff);
         let fact = format_factorization(diff);
 
