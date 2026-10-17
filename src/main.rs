@@ -60,7 +60,12 @@ struct Cli {
     /// Run Zhi-Wei Sun's core conjectures sequentially
     #[arg(long = "run-all")]
     run_all: bool,
+
+    /// Run the 4 low-bound and finite-ceiling prize bounty hunters (Hedef A, B, C, D)
+    #[arg(long = "low-bound-hunt")]
+    low_bound_hunt: bool,
 }
+
 
 fn parse_target(s: &str) -> TargetConjecture {
     match s.to_lowercase().replace('_', "-").as_str() {
@@ -178,8 +183,31 @@ fn main() {
             };
             counter_hunter::ppl087::hunt_ppl087(config);
         }
+        "low-bound" | "low-bound-bounties" | "bounties" => {
+            counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(cli.end.min(1_000_000), 25_000_000);
+            counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(2_000_000, 25_000_000);
+            counter_hunter::low_bound_bounties::hunt_hedef_c_square_pipi(cli.end.min(2_000_000), 25_000_000);
+            counter_hunter::low_bound_bounties::hunt_hedef_d_group_cycles(500);
+        }
+        "hedef-a" | "a247824" | "divisibility" => {
+            counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(cli.end.min(2_000_000), 30_000_000);
+        }
+        "hedef-b" | "a181901" | "collisions" => {
+            counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(5_000_000, 30_000_000);
+        }
+        "hedef-c" | "square-pipi" | "pipi" => {
+            counter_hunter::low_bound_bounties::hunt_hedef_c_square_pipi(cli.end.min(5_000_000), 30_000_000);
+        }
+        "hedef-d" | "group-cycles" | "abelian" => {
+            counter_hunter::low_bound_bounties::hunt_hedef_d_group_cycles(1_000);
+        }
         _ => {
-            if cli.run_all {
+            if cli.low_bound_hunt {
+                counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(cli.end.min(1_000_000), 25_000_000);
+                counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(2_000_000, 25_000_000);
+                counter_hunter::low_bound_bounties::hunt_hedef_c_square_pipi(cli.end.min(2_000_000), 25_000_000);
+                counter_hunter::low_bound_bounties::hunt_hedef_d_group_cycles(500);
+            } else if cli.run_all {
                 println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ZHI-WEI SUN CORE CONJECTURES <<<\x1b[0m\n");
                 let targets = [
                     TargetConjecture::Ppl013FibCatalan,

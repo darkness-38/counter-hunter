@@ -6,3 +6,4 @@ pub mod hunter;
 pub mod kimberling;
 pub mod permanent;
 pub mod ppl087;
+pub mod low_bound_bounties;
