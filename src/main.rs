@@ -17,8 +17,8 @@ use counter_hunter::hunter::{HuntConfig, Hunter};
 )]
 struct Cli {
     /// Conjecture target to hunt:
-    /// 'binom-2a-prime', 'binom-2a-twin', 'twin-2a-3b', 'sophie-2a-3b', 'erdos-2a-2b-twin'
-    #[arg(short = 't', long = "target", default_value = "binom-2a-prime")]
+    /// 'power-2a-3b' (default), 'b-cubic1' (cubic-2x3-y4), 'binom-2a-prime', etc.
+    #[arg(short = 't', long = "target", default_value = "power-2a-3b")]
     target: String,
 
     /// Start of search range (default: 100000000 = 10^8)
@@ -57,14 +57,18 @@ struct Cli {
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
-    /// Run all 5 CRT sniper targets sequentially
+    /// Run Zhi-Wei Sun's core conjectures sequentially
     #[arg(long = "run-all")]
     run_all: bool,
 }
 
 fn parse_target(s: &str) -> TargetConjecture {
     match s.to_lowercase().replace('_', "-").as_str() {
-        // CRT Sniper Targets
+        // Zhi-Wei Sun Primary Conjectures (Ordinary Primes)
+        "power" | "power-2a-3b" | "sun-power" | "a-power" => TargetConjecture::SunPower2a3b,
+        "b" | "b1" | "b-cubic1" | "cubic1" | "cubic-2x3-y4" | "cubic" => TargetConjecture::SunCubic2X3Y4,
+
+        // Additional CRT Sniper Targets
         "1" | "binom-2a-prime" | "binom-prime" => TargetConjecture::Binom2aPrime,
         "2" | "binom-2a-twin" | "binom-twin" => TargetConjecture::Binom2aTwin,
         "3" | "twin-2a-3b" | "twin-3b" => TargetConjecture::Twin2a3b,
@@ -74,15 +78,14 @@ fn parse_target(s: &str) -> TargetConjecture {
         // Legacy / Backwards Compatibility Aliases
         "a" | "a-twin" | "twin" => TargetConjecture::SunTwinPrime,
         "a-sophie" | "sophie" => TargetConjecture::SunSophieGermain,
-        "b" | "b1" | "b-cubic1" | "cubic1" => TargetConjecture::SunCubic2X3Y4,
         "b2" | "b-cubic2" | "cubic2" => TargetConjecture::SunCubicX32Y3,
         "c" | "c-binom" => TargetConjecture::SunCentralBinomial,
         "d" | "d1" | "d-fib" | "fib" => TargetConjecture::SunFibonacciLucas,
         "d2" | "d-square" | "romanov" => TargetConjecture::SunPrimeSquareRomanov,
 
         other => {
-            eprintln!("Unknown target '{}', defaulting to binom-2a-prime", other);
-            TargetConjecture::Binom2aPrime
+            eprintln!("Unknown target '{}', defaulting to power-2a-3b", other);
+            TargetConjecture::SunPower2a3b
         }
     }
 }
@@ -151,13 +154,10 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.run_all {
-        println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ALL 5 CRT SNIPER TARGETS <<<\x1b[0m\n");
+        println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ZHI-WEI SUN CORE CONJECTURES <<<\x1b[0m\n");
         let targets = [
-            TargetConjecture::Binom2aPrime,
-            TargetConjecture::Binom2aTwin,
-            TargetConjecture::Twin2a3b,
-            TargetConjecture::Sophie2a3b,
-            TargetConjecture::Erdos2a2bTwin,
+            TargetConjecture::SunPower2a3b,
+            TargetConjecture::SunCubic2X3Y4,
         ];
         for t in targets {
             let found = run_hunt_for_target(t, &cli);

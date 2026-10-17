@@ -124,9 +124,9 @@ impl Wheel30Segment {
                 continue;
             }
             let base = self.start + (byte_idx as u64) * 30;
-            for bit_idx in 0..8 {
+            for (bit_idx, &res) in WHEEL30_RESIDUES.iter().enumerate() {
                 if (b & (1u8 << bit_idx)) != 0 {
-                    let p = base + (WHEEL30_RESIDUES[bit_idx] as u64);
+                    let p = base + (res as u64);
                     if p >= self.start && p < self.end && p > 1 {
                         f(p);
                     }
@@ -405,6 +405,11 @@ impl PrimeBitset {
     #[inline(always)]
     pub fn len(&self) -> u64 {
         self.end - self.start
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     #[inline(always)]

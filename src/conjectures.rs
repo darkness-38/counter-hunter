@@ -27,6 +27,8 @@ pub enum TargetConjecture {
     Sophie2a3b,
     /// 5. erdos-2a-2b-twin: n = p + 2^a + 2^b (1 <= a <= b, p twin prime), n = 5 mod 6
     Erdos2a2bTwin,
+    /// 6. power-2a-3b: n = p + 2^a + 3^b (a >= 1, b >= 0, p ordinary prime, even n)
+    SunPower2a3b,
 
     // === LEGACY BRUTE-FORCE TARGETS ===
     SunTwinPrime,
@@ -70,6 +72,7 @@ impl TargetConjecture {
             Self::Twin2a3b => "Target 3: twin-2a-3b (n = p + 2^a + 3^b, p twin prime, n ≡ 0, 4 mod 6)",
             Self::Sophie2a3b => "Target 4: sophie-2a-3b (n = p + 2^a + 3^b, p Sophie Germain, n ≡ 0, 4 mod 6)",
             Self::Erdos2a2bTwin => "Target 5: erdos-2a-2b-twin (n = p + 2^a + 2^b, p twin prime, n ≡ 5 mod 6)",
+            Self::SunPower2a3b => "Sun's Original Power-Prime Conjecture (n = p + 2^a + 3^b, p prime, even n)",
 
             Self::SunTwinPrime => "Target A1: Sun's Twin-Prime Power Conjecture (n = p + 2^a + 3^b)",
             Self::SunSophieGermain => "Target A2: Sun's Sophie-Germain Power Conjecture (n = p + 2^a + 3^b)",
@@ -88,6 +91,7 @@ impl TargetConjecture {
             Self::Twin2a3b => "twin-2a-3b",
             Self::Sophie2a3b => "sophie-2a-3b",
             Self::Erdos2a2bTwin => "erdos-2a-2b-twin",
+            Self::SunPower2a3b => "power-2a-3b",
 
             Self::SunTwinPrime => "a-twin",
             Self::SunSophieGermain => "a-sophie",
@@ -103,6 +107,7 @@ impl TargetConjecture {
     pub fn prime_kind(&self) -> PrimeKind {
         match self {
             Self::Binom2aPrime
+            | Self::SunPower2a3b
             | Self::SunCubic2X3Y4
             | Self::SunCubicX32Y3
             | Self::SunCentralBinomial
@@ -126,6 +131,7 @@ impl TargetConjecture {
             Self::Binom2aTwin => (6, vec![5]),
             Self::Twin2a3b | Self::Sophie2a3b => (6, vec![0, 4]),
             Self::Erdos2a2bTwin => (6, vec![5]),
+            Self::SunPower2a3b => (2, vec![0]),
 
             Self::SunTwinPrime | Self::SunSophieGermain => (6, vec![0, 4]),
             Self::SunCubic2X3Y4 | Self::SunCubicX32Y3 => (1, vec![0]),
@@ -147,6 +153,7 @@ impl TargetConjecture {
             Self::Binom2aTwin => n > 4 && n % 6 == 5,
             Self::Twin2a3b | Self::Sophie2a3b => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
             Self::Erdos2a2bTwin => n > 4 && n % 6 == 5,
+            Self::SunPower2a3b => n > 4 && n.is_multiple_of(2),
 
             Self::SunTwinPrime | Self::SunSophieGermain => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
             Self::SunCubic2X3Y4 | Self::SunCubicX32Y3 => n >= 5,
@@ -186,7 +193,7 @@ impl TargetConjecture {
                 }
             }
 
-            Self::Twin2a3b | Self::Sophie2a3b => {
+            Self::SunPower2a3b | Self::Twin2a3b | Self::Sophie2a3b => {
                 // s = 2^a + 3^b (a >= 1, b >= 0)
                 let mut a = 1u32;
                 while let Some(p2) = 1u64.checked_shl(a) {
@@ -194,13 +201,9 @@ impl TargetConjecture {
                         break;
                     }
                     let mut p3 = 1u64;
-                    loop {
-                        if let Some(sum) = p2.checked_add(p3) {
-                            if sum <= max_shift {
-                                shifts.push(sum);
-                            } else {
-                                break;
-                            }
+                    while let Some(sum) = p2.checked_add(p3) {
+                        if sum <= max_shift {
+                            shifts.push(sum);
                         } else {
                             break;
                         }
@@ -245,13 +248,9 @@ impl TargetConjecture {
                         break;
                     }
                     let mut p3 = 1u64;
-                    loop {
-                        if let Some(sum) = p2.checked_add(p3) {
-                            if sum <= max_shift {
-                                shifts.push(sum);
-                            } else {
-                                break;
-                            }
+                    while let Some(sum) = p2.checked_add(p3) {
+                        if sum <= max_shift {
+                            shifts.push(sum);
                         } else {
                             break;
                         }
@@ -265,18 +264,19 @@ impl TargetConjecture {
             }
 
             Self::SunCubic2X3Y4 => {
-                // s = 2*x^3 + y^4 for x >= 1, y >= 1
-                let max_x = (((max_shift as f64) / 2.0).cbrt().ceil() as u64).max(1);
+                // s = 2*x^3 + y^4 for x >= 1, y >= 1 (capped at 20M shifts pool for CRT covering)
+                let cap = max_shift.min(20_000_000);
+                let max_x = (((cap as f64) / 2.0).cbrt().ceil() as u64).max(1);
                 for x in 1..=max_x {
                     let x3_2 = 2 * x * x * x;
-                    if x3_2 >= max_shift {
+                    if x3_2 >= cap {
                         break;
                     }
                     let mut y = 1u64;
                     while let Some(val) = y.checked_mul(y).and_then(|y2| y2.checked_mul(y2)) {
                         let y4 = val;
                         let sum = x3_2 + y4;
-                        if sum <= max_shift {
+                        if sum <= cap {
                             shifts.push(sum);
                         } else {
                             break;
@@ -615,6 +615,8 @@ mod tests {
     #[test]
     fn test_preflight_checks() {
         let targets = [
+            (TargetConjecture::SunPower2a3b, true),
+            (TargetConjecture::SunCubic2X3Y4, true),
             (TargetConjecture::Binom2aPrime, true),
             (TargetConjecture::Twin2a3b, true),
             (TargetConjecture::Sophie2a3b, true),
