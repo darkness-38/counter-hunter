@@ -130,7 +130,7 @@ pub fn is_prime_fast(n: u64) -> bool {
     if n == 2 || n == 3 || n == 5 || n == 7 || n == 11 || n == 13 || n == 17 || n == 19 || n == 23 {
         return true;
     }
-    if n % 2 == 0 || n % 3 == 0 || n % 5 == 0 || n % 7 == 0 || n % 11 == 0 || n % 13 == 0 || n % 17 == 0 || n % 19 == 0 || n % 23 == 0 {
+    if n.is_multiple_of(2) || n.is_multiple_of(3) || n.is_multiple_of(5) || n.is_multiple_of(7) || n.is_multiple_of(11) || n.is_multiple_of(13) || n.is_multiple_of(17) || n.is_multiple_of(19) || n.is_multiple_of(23) {
         return false;
     }
     if n < 29 * 29 {
@@ -204,7 +204,7 @@ pub fn smallest_prime_factor(n: u64) -> u64 {
     }
     // Trial division for small primes
     for &p in &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113] {
-        if n % p == 0 {
+        if n.is_multiple_of(p) {
             return p;
         }
     }
@@ -216,10 +216,10 @@ pub fn smallest_prime_factor(n: u64) -> u64 {
     // Extended trial division up to 10,000
     let mut d = 115u64;
     while d <= 10_000 && d * d <= n {
-        if n % d == 0 {
+        if n.is_multiple_of(d) {
             return if is_prime_fast(d) { d } else { smallest_prime_factor(d) };
         }
-        if n % (d + 2) == 0 {
+        if n.is_multiple_of(d + 2) {
             let f = d + 2;
             return if is_prime_fast(f) { f } else { smallest_prime_factor(f) };
         }
@@ -239,13 +239,13 @@ pub fn smallest_prime_factor(n: u64) -> u64 {
 
 /// Pollard's Rho algorithm with Brent's cycle detection optimization.
 pub fn pollard_brent_factor(n: u64) -> u64 {
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return 2;
     }
-    if n % 3 == 0 {
+    if n.is_multiple_of(3) {
         return 3;
     }
-    if n % 5 == 0 {
+    if n.is_multiple_of(5) {
         return 5;
     }
 
@@ -277,7 +277,7 @@ pub fn pollard_brent_factor(n: u64) -> u64 {
 
             let x_val = mont.reduce(x as u128);
             let y_val = mont.reduce(y as u128);
-            let diff = if x_val > y_val { x_val - y_val } else { y_val - x_val };
+            let diff = x_val.abs_diff(y_val);
             d = gcd(diff, n);
         }
 
@@ -296,7 +296,7 @@ pub fn factorize(mut n: u64) -> Vec<(u64, u32)> {
     }
 
     for &p in &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97] {
-        while n % p == 0 {
+        while n.is_multiple_of(p) {
             factors.push(p);
             n /= p;
         }

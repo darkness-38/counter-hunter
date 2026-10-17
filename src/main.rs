@@ -29,16 +29,16 @@ struct Cli {
     #[arg(short = 'e', long = "end", default_value = "1000000000")]
     end: u64,
 
-    /// Segment size in number of integers (default: 33554432 = 2^25 integers, 4 MB bitset)
-    #[arg(long = "segment-size", default_value = "33554432")]
+    /// Segment size in number of integers (default: 1048576 = 2^20 integers, 128 KiB bitset)
+    #[arg(long = "segment-size", default_value = "1048576")]
     segment_size: u64,
 
-    /// Sieve margin for fast Shift-OR (default: 2097152 = 2^21 integers)
-    #[arg(long = "margin", default_value = "2097152")]
+    /// Sieve margin for fast Shift-OR (default: 0 = dynamic bound to max shift)
+    #[arg(long = "margin", default_value = "0")]
     margin: u64,
 
-    /// Maximum number of shifts to apply in bitwise sieve phase (default: 150)
-    #[arg(long = "max-shifts", default_value = "150")]
+    /// Maximum number of shifts to apply in bitwise sieve phase (default: 0 = all valid shifts)
+    #[arg(long = "max-shifts", default_value = "0")]
     max_shifts: usize,
 
     /// Maximum counterexamples to fully factorize and save to proof file (default: 20)
@@ -130,8 +130,13 @@ fn run_hunt_for_target(target: TargetConjecture, cli: &Cli) {
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1m🎯 Target Conjecture :\x1b[0m \x1b[1;33m{}\x1b[0m", target.name());
     println!("\x1b[1m🔍 Search Space     :\x1b[0m {} .. {}", format_number(cli.start), format_number(cli.end));
-    println!("\x1b[1m⚡ Segment Size     :\x1b[0m {} numbers ({:.1} MB bitset)", cli.segment_size, cli.segment_size as f64 / 8.0 / 1024.0 / 1024.0);
-    println!("\x1b[1m🛡️ Sieve Margin     :\x1b[0m {} numbers ({:.1} MB)", cli.margin, cli.margin as f64 / 8.0 / 1024.0 / 1024.0);
+    let margin_display = if cli.margin == 0 {
+        "Dynamic (bound to max shift)".to_string()
+    } else {
+        format!("{} numbers ({:.1} MB)", cli.margin, cli.margin as f64 / 8.0 / 1024.0 / 1024.0)
+    };
+    println!("\x1b[1m⚡ Segment Size     :\x1b[0m {} numbers ({:.1} KiB bitset)", cli.segment_size, cli.segment_size as f64 / 8.0 / 1024.0);
+    println!("\x1b[1m🛡️ Sieve Margin     :\x1b[0m {}", margin_display);
     println!("\x1b[1m🧵 Threading Engine :\x1b[0m {} workers (Lock-free atomic work stealing)", if cli.threads == 0 { "All available cores".to_string() } else { cli.threads.to_string() });
     println!("\x1b[1m📡 Telemetry Pulse  :\x1b[0m Every {}s (heartbeat monitor)", cli.telemetry_interval);
     println!("\x1b[1m📁 Proof Log File   :\x1b[0m {}", cli.output);

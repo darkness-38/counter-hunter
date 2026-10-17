@@ -70,7 +70,7 @@ impl TargetConjecture {
             Self::SunCubicX32Y3 => n >= 5,
             Self::SunCentralBinomial => n > 2 && n % 2 == 1,
             Self::SunFibonacciLucas => n >= 4,
-            Self::SunPrimeSquareRomanov => n >= 7,
+            Self::SunPrimeSquareRomanov => n >= 10 && n.is_multiple_of(2),
         }
     }
 
@@ -270,10 +270,10 @@ impl TargetConjecture {
                 matches!(n, 1 | 2)
             }
             Self::SunFibonacciLucas => {
-                matches!(n, 1 | 2 | 3)
+                matches!(n, 1..=3)
             }
             Self::SunPrimeSquareRomanov => {
-                matches!(n, 1 | 2 | 3 | 4 | 5 | 6)
+                matches!(n, 1..=6)
             }
             _ => false,
         }

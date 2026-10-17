@@ -93,7 +93,7 @@ impl Wheel30Segment {
         if n == 2 || n == 3 || n == 5 {
             return true;
         }
-        if n < 2 || n % 2 == 0 || n % 3 == 0 || n % 5 == 0 {
+        if n < 2 || n.is_multiple_of(2) || n.is_multiple_of(3) || n.is_multiple_of(5) {
             return false;
         }
 
@@ -193,7 +193,7 @@ impl Wheel30Sieve {
 
             // Find smallest multiple m = p * q >= max(p*p, start) with gcd(q, 30) == 1
             let min_target = (p * p).max(start);
-            let mut q = (min_target + p - 1) / p;
+            let mut q = min_target.div_ceil(p);
             if q < p {
                 q = p;
             }
@@ -250,7 +250,7 @@ impl Wheel30Sieve {
             }
 
             let min_target = (p * p).max(seg_start);
-            let mut q = (min_target + p - 1) / p;
+            let mut q = min_target.div_ceil(p);
             if q < p {
                 q = p;
             }
@@ -394,7 +394,7 @@ impl PrimeBitset {
     pub fn new(start: u64, end: u64) -> Self {
         assert!(end >= start, "end must be >= start");
         let len = (end - start) as usize;
-        let num_words = (len + 63) / 64;
+        let num_words = len.div_ceil(64);
         Self {
             start,
             end,
@@ -486,7 +486,7 @@ impl SegmentedSieve {
             return bitset;
         }
 
-        let odd_pattern = if start % 2 == 0 {
+        let odd_pattern = if start.is_multiple_of(2) {
             0xAAAAAAAAAAAAAAAAu64
         } else {
             0x5555555555555555u64
@@ -496,7 +496,7 @@ impl SegmentedSieve {
             *w = odd_pattern;
         }
 
-        if start <= 0 && end > 0 {
+        if start == 0 && end > 0 {
             bitset.set_prime(0, false);
         }
         if start <= 1 && end > 1 {
@@ -516,12 +516,12 @@ impl SegmentedSieve {
                 break;
             }
 
-            let mut first_mult = ((start + p - 1) / p) * p;
+            let mut first_mult = start.div_ceil(p) * p;
             if first_mult < p * p {
                 first_mult = p * p;
             }
 
-            if first_mult % 2 == 0 {
+            if first_mult.is_multiple_of(2) {
                 first_mult += p;
             }
 
