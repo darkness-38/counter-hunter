@@ -158,26 +158,49 @@ fn run_hunt_for_target(target: TargetConjecture, cli: &Cli) -> bool {
 
 fn main() {
     let cli = Cli::parse();
+    let target_lower = cli.target.to_lowercase().replace('_', "-");
 
-    if cli.run_all {
-        println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ZHI-WEI SUN CORE CONJECTURES <<<\x1b[0m\n");
-        let targets = [
-            TargetConjecture::Ppl013FibCatalan,
-            TargetConjecture::Ppl094Pell,
-            TargetConjecture::Sun2x32y,
-            TargetConjecture::SunPrize2a5b,
-            TargetConjecture::SunPower2a3b,
-            TargetConjecture::SunCubic2X3Y4,
-        ];
-        for t in targets {
-            let found = run_hunt_for_target(t, &cli);
-            if found {
-                println!("\x1b[1;31m🚨 HALTING RUN-ALL: Counterexample detected for {}!\x1b[0m\n", t.short_code());
-                break;
+    match target_lower.as_str() {
+        "kimberling" | "ppl143" | "ppl150" | "ppl143-150" => {
+            let terms = if cli.end > 1_000_000_000 { 10_000_000 } else { cli.end as usize };
+            counter_hunter::kimberling::hunt_kimberling(terms, cli.telemetry_interval, &cli.output);
+        }
+        "permanent" | "sun-permanent" | "legendre" | "legendre-permanent" => {
+            counter_hunter::permanent::run_legendre_permanent_hunt();
+            counter_hunter::permanent::run_sun_trigonometric_conjecture_hunt();
+        }
+        "ppl087" | "ppl087-triple-prime" | "triple-prime" | "sun-triple" | "a185636" => {
+            let config = counter_hunter::ppl087::Ppl087Config {
+                start_n: cli.start.max(1457),
+                end_n: cli.end,
+                telemetry_interval_secs: cli.telemetry_interval,
+                output_file: cli.output.clone(),
+            };
+            counter_hunter::ppl087::hunt_ppl087(config);
+        }
+        _ => {
+            if cli.run_all {
+                println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ZHI-WEI SUN CORE CONJECTURES <<<\x1b[0m\n");
+                let targets = [
+                    TargetConjecture::Ppl013FibCatalan,
+                    TargetConjecture::Ppl094Pell,
+                    TargetConjecture::Sun2x32y,
+                    TargetConjecture::SunPrize2a5b,
+                    TargetConjecture::SunPower2a3b,
+                    TargetConjecture::SunCubic2X3Y4,
+                ];
+                for t in targets {
+                    let found = run_hunt_for_target(t, &cli);
+                    if found {
+                        println!("\x1b[1;31m🚨 HALTING RUN-ALL: Counterexample detected for {}!\x1b[0m\n", t.short_code());
+                        break;
+                    }
+                }
+            } else {
+                let target = parse_target(&cli.target);
+                run_hunt_for_target(target, &cli);
             }
         }
-    } else {
-        let target = parse_target(&cli.target);
-        run_hunt_for_target(target, &cli);
     }
 }
+
