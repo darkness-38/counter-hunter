@@ -207,6 +207,14 @@ fn main() {
         "hedef-d" | "group-cycles" | "abelian" => {
             counter_hunter::low_bound_bounties::hunt_hedef_d_group_cycles(1_000);
         }
+        "ppl043" | "ppl-043" | "sun-043" | "alternating" => {
+            let max_m = if cli.end == 0 || cli.end == 10_000_000_000 { 50_000_000 } else { cli.end as usize };
+            let j_depth = 2000;
+            counter_hunter::ppl043_breaker::hunt_ppl043_breaker(max_m, j_depth);
+        }
+        "wang-sun" | "wang-sun-circular" | "circular-sumset" | "wang" | "circular" => {
+            counter_hunter::wang_sun_circular::hunt_wang_sun_circular();
+        }
         _ => {
             if cli.low_bound_hunt {
                 let start_m = if cli.start == 0 { 3 } else { cli.start };
