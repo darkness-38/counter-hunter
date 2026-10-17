@@ -29,6 +29,8 @@ pub enum TargetConjecture {
     Erdos2a2bTwin,
     /// 6. power-2a-3b: n = p + 2^a + 3^b (a >= 1, b >= 0, p ordinary prime, even n)
     SunPower2a3b,
+    /// 7. sun-prize-2a5b: n = p + 2^a + 5^b (a >= 1, b >= 0, p odd prime, even n) - Zhi-Wei Sun's $100 Prize Conjecture
+    SunPrize2a5b,
 
     // === LEGACY BRUTE-FORCE TARGETS ===
     SunTwinPrime,
@@ -73,6 +75,7 @@ impl TargetConjecture {
             Self::Sophie2a3b => "Target 4: sophie-2a-3b (n = p + 2^a + 3^b, p Sophie Germain, n ≡ 0, 4 mod 6)",
             Self::Erdos2a2bTwin => "Target 5: erdos-2a-2b-twin (n = p + 2^a + 2^b, p twin prime, n ≡ 5 mod 6)",
             Self::SunPower2a3b => "Sun's Original Power-Prime Conjecture (n = p + 2^a + 3^b, p prime, even n)",
+            Self::SunPrize2a5b => "Sun's $100 Prize Conjecture on Powers of 2 and 5 (n = p + 2^a + 5^b, p odd prime, even n)",
 
             Self::SunTwinPrime => "Target A1: Sun's Twin-Prime Power Conjecture (n = p + 2^a + 3^b)",
             Self::SunSophieGermain => "Target A2: Sun's Sophie-Germain Power Conjecture (n = p + 2^a + 3^b)",
@@ -92,6 +95,7 @@ impl TargetConjecture {
             Self::Sophie2a3b => "sophie-2a-3b",
             Self::Erdos2a2bTwin => "erdos-2a-2b-twin",
             Self::SunPower2a3b => "power-2a-3b",
+            Self::SunPrize2a5b => "sun-prize-2a5b",
 
             Self::SunTwinPrime => "a-twin",
             Self::SunSophieGermain => "a-sophie",
@@ -108,6 +112,7 @@ impl TargetConjecture {
         match self {
             Self::Binom2aPrime
             | Self::SunPower2a3b
+            | Self::SunPrize2a5b
             | Self::SunCubic2X3Y4
             | Self::SunCubicX32Y3
             | Self::SunCentralBinomial
@@ -131,7 +136,7 @@ impl TargetConjecture {
             Self::Binom2aTwin => (6, vec![5]),
             Self::Twin2a3b | Self::Sophie2a3b => (6, vec![0, 4]),
             Self::Erdos2a2bTwin => (6, vec![5]),
-            Self::SunPower2a3b => (2, vec![0]),
+            Self::SunPower2a3b | Self::SunPrize2a5b => (2, vec![0]),
 
             Self::SunTwinPrime | Self::SunSophieGermain => (6, vec![0, 4]),
             Self::SunCubic2X3Y4 | Self::SunCubicX32Y3 => (1, vec![0]),
@@ -153,7 +158,7 @@ impl TargetConjecture {
             Self::Binom2aTwin => n > 4 && n % 6 == 5,
             Self::Twin2a3b | Self::Sophie2a3b => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
             Self::Erdos2a2bTwin => n > 4 && n % 6 == 5,
-            Self::SunPower2a3b => n > 4 && n.is_multiple_of(2),
+            Self::SunPower2a3b | Self::SunPrize2a5b => n > 4 && n.is_multiple_of(2),
 
             Self::SunTwinPrime | Self::SunSophieGermain => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
             Self::SunCubic2X3Y4 | Self::SunCubicX32Y3 => n >= 5,
@@ -209,6 +214,29 @@ impl TargetConjecture {
                         }
                         match p3.checked_mul(3) {
                             Some(next_p3) => p3 = next_p3,
+                            None => break,
+                        }
+                    }
+                    a += 1;
+                }
+            }
+
+            Self::SunPrize2a5b => {
+                // s = 2^a + 5^b (a >= 1, b >= 0)
+                let mut a = 1u32;
+                while let Some(p2) = 1u64.checked_shl(a) {
+                    if p2 >= max_shift {
+                        break;
+                    }
+                    let mut p5 = 1u64;
+                    while let Some(sum) = p2.checked_add(p5) {
+                        if sum <= max_shift {
+                            shifts.push(sum);
+                        } else {
+                            break;
+                        }
+                        match p5.checked_mul(5) {
+                            Some(next_p5) => p5 = next_p5,
                             None => break,
                         }
                     }
@@ -615,6 +643,7 @@ mod tests {
     #[test]
     fn test_preflight_checks() {
         let targets = [
+            (TargetConjecture::SunPrize2a5b, true),
             (TargetConjecture::SunPower2a3b, true),
             (TargetConjecture::SunCubic2X3Y4, true),
             (TargetConjecture::Binom2aPrime, true),

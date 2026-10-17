@@ -17,8 +17,8 @@ use counter_hunter::hunter::{HuntConfig, Hunter};
 )]
 struct Cli {
     /// Conjecture target to hunt:
-    /// 'power-2a-3b' (default), 'b-cubic1' (cubic-2x3-y4), 'binom-2a-prime', etc.
-    #[arg(short = 't', long = "target", default_value = "power-2a-3b")]
+    /// 'sun-prize-2a5b' ($100 Prize, default), 'power-2a-3b', 'b-cubic1', etc.
+    #[arg(short = 't', long = "target", default_value = "sun-prize-2a5b")]
     target: String,
 
     /// Start of search range (default: 100000000 = 10^8)
@@ -65,6 +65,7 @@ struct Cli {
 fn parse_target(s: &str) -> TargetConjecture {
     match s.to_lowercase().replace('_', "-").as_str() {
         // Zhi-Wei Sun Primary Conjectures (Ordinary Primes)
+        "sun-prize-2a5b" | "sun-prize" | "prize" | "2a-5b" | "power-2a-5b" => TargetConjecture::SunPrize2a5b,
         "power" | "power-2a-3b" | "sun-power" | "a-power" => TargetConjecture::SunPower2a3b,
         "b" | "b1" | "b-cubic1" | "cubic1" | "cubic-2x3-y4" | "cubic" => TargetConjecture::SunCubic2X3Y4,
 
@@ -84,8 +85,8 @@ fn parse_target(s: &str) -> TargetConjecture {
         "d2" | "d-square" | "romanov" => TargetConjecture::SunPrimeSquareRomanov,
 
         other => {
-            eprintln!("Unknown target '{}', defaulting to power-2a-3b", other);
-            TargetConjecture::SunPower2a3b
+            eprintln!("Unknown target '{}', defaulting to sun-prize-2a5b", other);
+            TargetConjecture::SunPrize2a5b
         }
     }
 }
@@ -156,6 +157,7 @@ fn main() {
     if cli.run_all {
         println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ZHI-WEI SUN CORE CONJECTURES <<<\x1b[0m\n");
         let targets = [
+            TargetConjecture::SunPrize2a5b,
             TargetConjecture::SunPower2a3b,
             TargetConjecture::SunCubic2X3Y4,
         ];

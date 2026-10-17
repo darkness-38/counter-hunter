@@ -48,7 +48,7 @@ pub const MEDIUM_PRIMES: [u64; 42] = [
 ];
 
 /// Small prime set tested for greedy modular covering.
-pub const COVERING_PRIMES: [u64; 10] = [5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+pub const COVERING_PRIMES: [u64; 11] = [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
 /// Determines whether choosing n = r (mod q) mathematically forces difference (n - s) to be composite.
 #[inline(always)]
