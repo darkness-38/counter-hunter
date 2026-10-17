@@ -1,5 +1,5 @@
 //! Counter-Hunter CLI Main Entry Point
-//! Ultra-fast bit-parallel counterexample hunter for Zhi-Wei Sun & Erdős conjectures.
+//! Ultra-fast CRT Covering Sniper Engine for Zhi-Wei Sun & Erdős Conjectures.
 
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -12,45 +12,33 @@ use counter_hunter::hunter::{HuntConfig, Hunter};
 #[command(
     name = "counter-hunter",
     author = "Advanced Agentic Coding Team",
-    version = "0.1.0",
-    about = "Bit-Parallel Counterexample Hunter for Zhi-Wei Sun & Erdős Conjectures"
+    version = "0.2.0",
+    about = "CRT Covering Sniper Engine for Zhi-Wei Sun & Erdős Conjectures"
 )]
 struct Cli {
     /// Conjecture target to hunt:
-    /// 'a-twin', 'a-sophie', 'b-cubic1', 'b-cubic2', 'c-binom', 'd-fib', 'd-square'
-    #[arg(short = 't', long = "target", default_value = "b-cubic1")]
+    /// 'binom-2a-prime', 'binom-2a-twin', 'twin-2a-3b', 'sophie-2a-3b', 'erdos-2a-2b-twin'
+    #[arg(short = 't', long = "target", default_value = "binom-2a-prime")]
     target: String,
 
-    /// Start of search range (e.g. 100000000)
+    /// Start of search range (default: 100000000 = 10^8)
     #[arg(short = 's', long = "start", default_value = "100000000")]
     start: u64,
 
-    /// End of search range (e.g. 1000000000)
-    #[arg(short = 'e', long = "end", default_value = "1000000000")]
+    /// End of search range (default: 10000000000 = 10^10, or up to 10^16)
+    #[arg(short = 'e', long = "end", default_value = "10000000000")]
     end: u64,
 
-    /// Segment size in number of integers (default: 1048576 = 2^20 integers, 128 KiB bitset)
-    #[arg(long = "segment-size", default_value = "1048576")]
-    segment_size: u64,
+    /// Maximum master CRT modulus M_master (default: 500000000000 = 5*10^11)
+    #[arg(long = "max-modulus", default_value = "500000000000")]
+    max_modulus: u64,
 
-    /// Sieve margin for fast Shift-OR (default: 0 = dynamic bound to max shift)
-    #[arg(long = "margin", default_value = "0")]
-    margin: u64,
-
-    /// Maximum number of shifts to apply in bitwise sieve phase (default: 0 = all valid shifts)
-    #[arg(long = "max-shifts", default_value = "0")]
-    max_shifts: usize,
-
-    /// Maximum counterexamples to fully factorize and save to proof file (default: 20)
-    #[arg(long = "max-counterexamples", default_value = "20")]
+    /// Maximum counterexamples to fully factorize before halting (default: 1)
+    #[arg(long = "max-counterexamples", default_value = "1")]
     max_counterexamples: usize,
 
-    /// Parity filter: 'default', 'odd', 'even', 'all'
-    #[arg(long = "parity", default_value = "default")]
-    parity: String,
-
-    /// Live telemetry reporting interval in seconds (default: 5)
-    #[arg(long = "telemetry-interval", default_value = "5")]
+    /// Live telemetry reporting interval in seconds (default: 10)
+    #[arg(long = "telemetry-interval", default_value = "10")]
     telemetry_interval: u64,
 
     /// Number of worker threads (default: 0 = Rayon auto-detect all cores)
@@ -61,33 +49,48 @@ struct Cli {
     #[arg(short = 'o', long = "output", default_value = "discovered_counterexamples.txt")]
     output: String,
 
+    /// Skip mandatory Pre-Flight validator
+    #[arg(long = "no-preflight")]
+    no_preflight: bool,
+
     /// Enable verbose candidate inspection logs
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
-    /// Benchmark all 4 conjecture targets sequentially
-    #[arg(long = "benchmark-all")]
-    benchmark_all: bool,
+    /// Run all 5 CRT sniper targets sequentially
+    #[arg(long = "run-all")]
+    run_all: bool,
 }
 
 fn parse_target(s: &str) -> TargetConjecture {
-    match s.to_lowercase().as_str() {
+    match s.to_lowercase().replace('_', "-").as_str() {
+        // CRT Sniper Targets
+        "1" | "binom-2a-prime" | "binom-prime" => TargetConjecture::Binom2aPrime,
+        "2" | "binom-2a-twin" | "binom-twin" => TargetConjecture::Binom2aTwin,
+        "3" | "twin-2a-3b" | "twin-3b" => TargetConjecture::Twin2a3b,
+        "4" | "sophie-2a-3b" | "sophie-3b" => TargetConjecture::Sophie2a3b,
+        "5" | "erdos-2a-2b-twin" | "erdos-twin" | "erdos" => TargetConjecture::Erdos2a2bTwin,
+
+        // Legacy / Backwards Compatibility Aliases
         "a" | "a-twin" | "twin" => TargetConjecture::SunTwinPrime,
         "a-sophie" | "sophie" => TargetConjecture::SunSophieGermain,
         "b" | "b1" | "b-cubic1" | "cubic1" => TargetConjecture::SunCubic2X3Y4,
         "b2" | "b-cubic2" | "cubic2" => TargetConjecture::SunCubicX32Y3,
-        "c" | "c-binom" | "binom" => TargetConjecture::SunCentralBinomial,
+        "c" | "c-binom" => TargetConjecture::SunCentralBinomial,
         "d" | "d1" | "d-fib" | "fib" => TargetConjecture::SunFibonacciLucas,
         "d2" | "d-square" | "romanov" => TargetConjecture::SunPrimeSquareRomanov,
+
         other => {
-            eprintln!("Unknown target '{}', defaulting to Target B1 (n = p + 2x^3 + y^4)", other);
-            TargetConjecture::SunCubic2X3Y4
+            eprintln!("Unknown target '{}', defaulting to binom-2a-prime", other);
+            TargetConjecture::Binom2aPrime
         }
     }
 }
 
 fn format_number(n: u64) -> String {
-    if n >= 1_000_000_000_000 {
+    if n >= 1_000_000_000_000_000 {
+        format!("{:.3} P ({})", n as f64 / 1e15, n)
+    } else if n >= 1_000_000_000_000 {
         format!("{:.3} T ({})", n as f64 / 1e12, n)
     } else if n >= 1_000_000_000 {
         format!("{:.3} B ({})", n as f64 / 1e9, n)
@@ -98,92 +101,70 @@ fn format_number(n: u64) -> String {
     }
 }
 
-fn parse_parity(s: &str) -> counter_hunter::hunter::ParityFilter {
-    match s.to_lowercase().as_str() {
-        "odd" => counter_hunter::hunter::ParityFilter::OddOnly,
-        "even" => counter_hunter::hunter::ParityFilter::EvenOnly,
-        "all" => counter_hunter::hunter::ParityFilter::All,
-        _ => counter_hunter::hunter::ParityFilter::Default,
-    }
-}
-
-fn run_hunt_for_target(target: TargetConjecture, cli: &Cli) {
-    let parity = parse_parity(&cli.parity);
+fn run_hunt_for_target(target: TargetConjecture, cli: &Cli) -> bool {
     let config = HuntConfig {
         target,
         start: cli.start,
         end: cli.end,
-        segment_size: cli.segment_size,
-        max_sieve_margin: cli.margin,
-        max_shifts_to_apply: cli.max_shifts,
+        max_master_modulus: cli.max_modulus,
         max_counterexamples: cli.max_counterexamples,
-        parity,
         num_threads: cli.threads,
         telemetry_interval_secs: cli.telemetry_interval,
-        verbose: cli.verbose,
         output_file: cli.output.clone(),
+        run_preflight: !cli.no_preflight,
+        verbose: cli.verbose,
     };
 
     println!("\x1b[1;36m================================================================================\x1b[0m");
-    println!("\x1b[1;32m🚀 COUNTER-HUNTER — High-Throughput Bit-Parallel Number Theory Engine\x1b[0m");
-    println!("   Zhi-Wei Sun & Paul Erdős Open Conjectures Hunter (Lock-Free Multi-Core)");
+    println!("\x1b[1;32m🎯 CRT COVERING SNIPER ENGINE — Number Theory Counterexample Hunter\x1b[0m");
+    println!("   Multiplicative Order Covering & Chinese Remainder Progression Leaper");
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1m🎯 Target Conjecture :\x1b[0m \x1b[1;33m{}\x1b[0m", target.name());
     println!("\x1b[1m🔍 Search Space     :\x1b[0m {} .. {}", format_number(cli.start), format_number(cli.end));
-    let margin_display = if cli.margin == 0 {
-        "Dynamic (bound to max shift)".to_string()
-    } else {
-        format!("{} numbers ({:.1} MB)", cli.margin, cli.margin as f64 / 8.0 / 1024.0 / 1024.0)
-    };
-    println!("\x1b[1m⚡ Segment Size     :\x1b[0m {} numbers ({:.1} KiB bitset)", cli.segment_size, cli.segment_size as f64 / 8.0 / 1024.0);
-    println!("\x1b[1m🛡️ Sieve Margin     :\x1b[0m {}", margin_display);
-    println!("\x1b[1m🧵 Threading Engine :\x1b[0m {} workers (Lock-free atomic work stealing)", if cli.threads == 0 { "All available cores".to_string() } else { cli.threads.to_string() });
-    println!("\x1b[1m📡 Telemetry Pulse  :\x1b[0m Every {}s (heartbeat monitor)", cli.telemetry_interval);
+    println!("\x1b[1m⚡ Modulus Cap      :\x1b[0m M_master ≤ {}", format_number(cli.max_modulus));
+    println!("\x1b[1m🧵 Threading Engine :\x1b[0m {} workers (Lock-free work stealing)", if cli.threads == 0 { "All available cores".to_string() } else { cli.threads.to_string() });
+    println!("\x1b[1m📡 Telemetry Pulse  :\x1b[0m Every {}s", cli.telemetry_interval);
     println!("\x1b[1m📁 Proof Log File   :\x1b[0m {}", cli.output);
-    println!("\x1b[1;36m================================================================================\x1b[0m");
+    println!("\x1b[1;36m================================================================================\x1b[0m\n");
 
     let start_time = Instant::now();
     let hunter = Hunter::new(config);
-    hunter.hunt();
+    let found_ce = hunter.hunt();
 
     let total_elapsed = start_time.elapsed().as_secs_f64();
-    let total_scanned = hunter.stats.numbers_scanned.load(Ordering::Relaxed);
+    let total_k = hunter.stats.k_steps_evaluated.load(Ordering::Relaxed);
     let total_candidates = hunter.stats.candidates_tested.load(Ordering::Relaxed);
     let total_counterexamples = hunter.stats.counterexamples_found.load(Ordering::Relaxed);
-    let total_l1_blocks = hunter.stats.l1_blocks_processed.load(Ordering::Relaxed);
-    let overall_speed = if total_elapsed > 0.0 {
-        (total_scanned as f64) / (total_elapsed * 1e9)
-    } else {
-        0.0
-    };
 
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1;32m🏁 HUNT COMPLETED for {}\x1b[0m", target.short_code());
-    println!("   Total Integers Scanned   : {}", total_scanned);
-    println!("   Average Throughput       : \x1b[1;32m{:.3} Giga-integers / second\x1b[0m ({:.1} Mnums/s)", overall_speed, overall_speed * 1000.0);
-    println!("   Total Time Elapsed       : {:.2} seconds", total_elapsed);
-    println!("   L1 Cache 32 KiB Blocks   : {}", total_l1_blocks);
-    println!("   Candidates Filtered      : {}", total_candidates);
+    println!("   Total k Steps Evaluated  : {}", total_k);
+    println!("   Candidates Tested        : {}", total_candidates);
     println!("   Counterexamples Verified : \x1b[1;31m{}\x1b[0m", total_counterexamples);
+    println!("   Total Time Elapsed       : {:.2} seconds", total_elapsed);
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
+
+    found_ce
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    if cli.benchmark_all {
-        println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ALL 4 CONJECTURE TARGETS <<<\x1b[0m\n");
+    if cli.run_all {
+        println!("\x1b[1;33m>>> EXECUTING SEQUENTIAL SCAN ACROSS ALL 5 CRT SNIPER TARGETS <<<\x1b[0m\n");
         let targets = [
-            TargetConjecture::SunTwinPrime,
-            TargetConjecture::SunSophieGermain,
-            TargetConjecture::SunCubic2X3Y4,
-            TargetConjecture::SunCubicX32Y3,
-            TargetConjecture::SunCentralBinomial,
-            TargetConjecture::SunFibonacciLucas,
-            TargetConjecture::SunPrimeSquareRomanov,
+            TargetConjecture::Binom2aPrime,
+            TargetConjecture::Binom2aTwin,
+            TargetConjecture::Twin2a3b,
+            TargetConjecture::Sophie2a3b,
+            TargetConjecture::Erdos2a2bTwin,
         ];
         for t in targets {
-            run_hunt_for_target(t, &cli);
+            let found = run_hunt_for_target(t, &cli);
+            if found {
+                println!("\x1b[1;31m🚨 HALTING RUN-ALL: Counterexample detected for {}!\x1b[0m\n", t.short_code());
+                break;
+            }
         }
     } else {
         let target = parse_target(&cli.target);

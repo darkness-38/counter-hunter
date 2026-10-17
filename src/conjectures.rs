@@ -2,22 +2,39 @@ use crate::verifier::{
     format_factorization, is_prime, is_sophie_germain, is_twin_prime, verify_counterexample,
 };
 
+/// Type of prime required by the conjecture target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimeKind {
+    /// Ordinary prime p.
+    Prime,
+    /// Twin prime: both p and p+2 are prime.
+    TwinPrime,
+    /// Sophie Germain prime: both p and 2p+1 are prime.
+    SophieGermain,
+}
+
 /// The supported open conjecture targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetConjecture {
-    /// Hedef A1: n = p + 2^a + 3^b (p, p+2 twin primes, a >= 0, b >= 0)
+    // === NEW MATHEMATICALLY RIGOROUS CRT SNIPER TARGETS ===
+    /// 1. binom-2a-prime: n = p + binom(2k, k) + 2^a (k >= 1, a >= 1, p prime), n = 1 mod 2
+    Binom2aPrime,
+    /// 2. binom-2a-twin: n = p + binom(2k, k) + 2^a (k >= 1, a >= 1, p twin prime), n = 5 mod 6
+    Binom2aTwin,
+    /// 3. twin-2a-3b: n = p + 2^a + 3^b (a >= 1, b >= 0, p twin prime), n = 0, 4 mod 6
+    Twin2a3b,
+    /// 4. sophie-2a-3b: n = p + 2^a + 3^b (a >= 1, b >= 0, p Sophie Germain), n = 0, 4 mod 6
+    Sophie2a3b,
+    /// 5. erdos-2a-2b-twin: n = p + 2^a + 2^b (1 <= a <= b, p twin prime), n = 5 mod 6
+    Erdos2a2bTwin,
+
+    // === LEGACY BRUTE-FORCE TARGETS ===
     SunTwinPrime,
-    /// Hedef A2: n = p + 2^a + 3^b (p Sophie Germain: 2p+1 prime, a >= 0, b >= 0)
     SunSophieGermain,
-    /// Hedef B1: n = p + 2x^3 + y^4 (p prime, x >= 1, y >= 1)
     SunCubic2X3Y4,
-    /// Hedef B2: n = p + x^3 + 2y^3 (p prime, x >= 1, y >= 1)
     SunCubicX32Y3,
-    /// Hedef C: n = p + binom(2k, k) +/- 2^m (p prime, k >= 1, m >= 0)
     SunCentralBinomial,
-    /// Hedef D1: n = p + F_k + L_m (p prime, k >= 1, m >= 1)
     SunFibonacciLucas,
-    /// Hedef D2: n = p^2 + q + 2^a (p, q primes, a >= 0)
     SunPrimeSquareRomanov,
 }
 
@@ -32,9 +49,28 @@ pub enum VerificationResult {
     KnownSmallException,
 }
 
+/// Pre-Flight Validator Report evaluating candidate density and small exception behavior.
+#[derive(Debug, Clone)]
+pub struct PreflightReport {
+    pub target: TargetConjecture,
+    pub start: u64,
+    pub end: u64,
+    pub tested_count: usize,
+    pub exceptions_count: usize,
+    pub sample_exceptions: Vec<u64>,
+    pub passed: bool,
+    pub verdict: &'static str,
+}
+
 impl TargetConjecture {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Binom2aPrime => "Target 1: binom-2a-prime (n = p + binom(2k,k) + 2^a, n ≡ 1 mod 2)",
+            Self::Binom2aTwin => "Target 2: binom-2a-twin (n = p + binom(2k,k) + 2^a, p twin prime, n ≡ 5 mod 6)",
+            Self::Twin2a3b => "Target 3: twin-2a-3b (n = p + 2^a + 3^b, p twin prime, n ≡ 0, 4 mod 6)",
+            Self::Sophie2a3b => "Target 4: sophie-2a-3b (n = p + 2^a + 3^b, p Sophie Germain, n ≡ 0, 4 mod 6)",
+            Self::Erdos2a2bTwin => "Target 5: erdos-2a-2b-twin (n = p + 2^a + 2^b, p twin prime, n ≡ 5 mod 6)",
+
             Self::SunTwinPrime => "Target A1: Sun's Twin-Prime Power Conjecture (n = p + 2^a + 3^b)",
             Self::SunSophieGermain => "Target A2: Sun's Sophie-Germain Power Conjecture (n = p + 2^a + 3^b)",
             Self::SunCubic2X3Y4 => "Target B1: Sun's Mixed Cubic-Prime Representation (n = p + 2x^3 + y^4)",
@@ -47,6 +83,12 @@ impl TargetConjecture {
 
     pub fn short_code(&self) -> &'static str {
         match self {
+            Self::Binom2aPrime => "binom-2a-prime",
+            Self::Binom2aTwin => "binom-2a-twin",
+            Self::Twin2a3b => "twin-2a-3b",
+            Self::Sophie2a3b => "sophie-2a-3b",
+            Self::Erdos2a2bTwin => "erdos-2a-2b-twin",
+
             Self::SunTwinPrime => "a-twin",
             Self::SunSophieGermain => "a-sophie",
             Self::SunCubic2X3Y4 => "b-cubic1",
@@ -57,17 +99,57 @@ impl TargetConjecture {
         }
     }
 
+    /// Prime kind required by the conjecture.
+    pub fn prime_kind(&self) -> PrimeKind {
+        match self {
+            Self::Binom2aPrime
+            | Self::SunCubic2X3Y4
+            | Self::SunCubicX32Y3
+            | Self::SunCentralBinomial
+            | Self::SunFibonacciLucas
+            | Self::SunPrimeSquareRomanov => PrimeKind::Prime,
+
+            Self::Binom2aTwin
+            | Self::Twin2a3b
+            | Self::Erdos2a2bTwin
+            | Self::SunTwinPrime => PrimeKind::TwinPrime,
+
+            Self::Sophie2a3b
+            | Self::SunSophieGermain => PrimeKind::SophieGermain,
+        }
+    }
+
+    /// Base modulus and allowed residue classes.
+    pub fn base_modulus_and_residues(&self) -> (u64, Vec<u64>) {
+        match self {
+            Self::Binom2aPrime => (2, vec![1]),
+            Self::Binom2aTwin => (6, vec![5]),
+            Self::Twin2a3b | Self::Sophie2a3b => (6, vec![0, 4]),
+            Self::Erdos2a2bTwin => (6, vec![5]),
+
+            Self::SunTwinPrime | Self::SunSophieGermain => (6, vec![0, 4]),
+            Self::SunCubic2X3Y4 | Self::SunCubicX32Y3 => (1, vec![0]),
+            Self::SunCentralBinomial => (2, vec![1]),
+            Self::SunFibonacciLucas => (1, vec![0]),
+            Self::SunPrimeSquareRomanov => (2, vec![0]),
+        }
+    }
+
     /// Whether the fast sieve should sieve twin primes instead of regular primes.
     pub fn requires_twin_primes(&self) -> bool {
-        matches!(self, Self::SunTwinPrime)
+        matches!(self.prime_kind(), PrimeKind::TwinPrime)
     }
 
     /// Checks if `n` satisfies the parity/domain constraints of the conjecture.
     pub fn is_valid_candidate(&self, n: u64) -> bool {
         match self {
-            Self::SunTwinPrime | Self::SunSophieGermain => n > 3 && n % 2 == 1,
-            Self::SunCubic2X3Y4 => n >= 5,
-            Self::SunCubicX32Y3 => n >= 5,
+            Self::Binom2aPrime => n > 4 && n % 2 == 1,
+            Self::Binom2aTwin => n > 4 && n % 6 == 5,
+            Self::Twin2a3b | Self::Sophie2a3b => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
+            Self::Erdos2a2bTwin => n > 4 && n % 6 == 5,
+
+            Self::SunTwinPrime | Self::SunSophieGermain => n > 4 && n.is_multiple_of(2) && (n.is_multiple_of(6) || n % 6 == 4),
+            Self::SunCubic2X3Y4 | Self::SunCubicX32Y3 => n >= 5,
             Self::SunCentralBinomial => n > 2 && n % 2 == 1,
             Self::SunFibonacciLucas => n >= 4,
             Self::SunPrimeSquareRomanov => n >= 10 && n.is_multiple_of(2),
@@ -79,15 +161,46 @@ impl TargetConjecture {
         let mut shifts = Vec::new();
 
         match self {
-            Self::SunTwinPrime | Self::SunSophieGermain => {
-                // s = 2^a + 3^b
-                let mut p2 = 1u64; // 2^0
+            Self::Binom2aPrime | Self::Binom2aTwin => {
+                // s = binom(2k, k) + 2^a (k >= 1, a >= 1)
+                let mut k = 1u64;
                 loop {
-                    let mut p3 = 1u64; // 3^0
+                    let c = central_binomial(k);
+                    if c == 0 || c >= max_shift {
+                        break;
+                    }
+                    let mut a = 1u32;
+                    while let Some(p2) = 1u64.checked_shl(a) {
+                        if let Some(sum) = c.checked_add(p2) {
+                            if sum <= max_shift {
+                                shifts.push(sum);
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                        a += 1;
+                    }
+                    k += 1;
+                }
+            }
+
+            Self::Twin2a3b | Self::Sophie2a3b => {
+                // s = 2^a + 3^b (a >= 1, b >= 0)
+                let mut a = 1u32;
+                while let Some(p2) = 1u64.checked_shl(a) {
+                    if p2 >= max_shift {
+                        break;
+                    }
+                    let mut p3 = 1u64;
                     loop {
-                        let sum = p2.saturating_add(p3);
-                        if sum <= max_shift {
-                            shifts.push(sum);
+                        if let Some(sum) = p2.checked_add(p3) {
+                            if sum <= max_shift {
+                                shifts.push(sum);
+                            } else {
+                                break;
+                            }
                         } else {
                             break;
                         }
@@ -96,10 +209,58 @@ impl TargetConjecture {
                             None => break,
                         }
                     }
-                    match p2.checked_mul(2) {
-                        Some(next_p2) => p2 = next_p2,
-                        None => break,
+                    a += 1;
+                }
+            }
+
+            Self::Erdos2a2bTwin => {
+                // s = 2^a + 2^b (1 <= a <= b)
+                let mut a = 1u32;
+                while let Some(p2a) = 1u64.checked_shl(a) {
+                    if p2a >= max_shift {
+                        break;
                     }
+                    let mut b = a;
+                    while let Some(p2b) = 1u64.checked_shl(b) {
+                        if let Some(sum) = p2a.checked_add(p2b) {
+                            if sum <= max_shift {
+                                shifts.push(sum);
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                        b += 1;
+                    }
+                    a += 1;
+                }
+            }
+
+            Self::SunTwinPrime | Self::SunSophieGermain => {
+                // s = 2^a + 3^b (a >= 1, b >= 0 for even integers)
+                let mut a = 1u32;
+                while let Some(p2) = 1u64.checked_shl(a) {
+                    if p2 >= max_shift {
+                        break;
+                    }
+                    let mut p3 = 1u64;
+                    loop {
+                        if let Some(sum) = p2.checked_add(p3) {
+                            if sum <= max_shift {
+                                shifts.push(sum);
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                        match p3.checked_mul(3) {
+                            Some(next_p3) => p3 = next_p3,
+                            None => break,
+                        }
+                    }
+                    a += 1;
                 }
             }
 
@@ -112,18 +273,15 @@ impl TargetConjecture {
                         break;
                     }
                     let mut y = 1u64;
-                    loop {
-                        let y4 = match y.checked_mul(y).and_then(|y2| y2.checked_mul(y2)) {
-                            Some(val) => val,
-                            None => break,
-                        };
+                    while let Some(val) = y.checked_mul(y).and_then(|y2| y2.checked_mul(y2)) {
+                        let y4 = val;
                         let sum = x3_2 + y4;
                         if sum <= max_shift {
                             shifts.push(sum);
-                            y += 1;
                         } else {
                             break;
                         }
+                        y += 1;
                     }
                 }
             }
@@ -137,64 +295,44 @@ impl TargetConjecture {
                         break;
                     }
                     let mut y = 1u64;
-                    loop {
-                        let y3_2 = match y.checked_mul(y).and_then(|y2| y2.checked_mul(y)).and_then(|v| v.checked_mul(2)) {
-                            Some(val) => val,
-                            None => break,
-                        };
+                    while let Some(val) = y.checked_mul(y).and_then(|y2| y2.checked_mul(y)).and_then(|v| v.checked_mul(2)) {
+                        let y3_2 = val;
                         let sum = x3 + y3_2;
                         if sum <= max_shift {
                             shifts.push(sum);
-                            y += 1;
                         } else {
                             break;
                         }
+                        y += 1;
                     }
                 }
             }
 
             Self::SunCentralBinomial => {
-                // s = binom(2k, k) + 2^m or binom(2k, k) - 2^m
-                // binom(2k, k) for k >= 1
-                let mut k = 1u64;
-                loop {
+                // s = binom(2k, k) +/- 2^m
+                let max_k = 30u64;
+                for k in 1..=max_k {
                     let c = central_binomial(k);
-                    if c == 0 || c > max_shift && c - 1 > max_shift {
+                    if c == 0 || c >= max_shift {
                         break;
                     }
-
-                    // c + 2^m
-                    let mut p2 = 1u64;
-                    loop {
-                        if let Some(sum) = c.checked_add(p2) {
-                            if sum <= max_shift {
+                    let mut m = 0u32;
+                    while let Some(p2) = 1u64.checked_shl(m) {
+                        if let Some(sum) = c.checked_add(p2)
+                            && sum <= max_shift {
                                 shifts.push(sum);
-                            } else {
-                                break;
                             }
-                        } else {
+                        if c > p2 {
+                            let diff = c - p2;
+                            if diff <= max_shift && diff > 0 {
+                                shifts.push(diff);
+                            }
+                        }
+                        m += 1;
+                        if p2 >= max_shift {
                             break;
                         }
-                        match p2.checked_mul(2) {
-                            Some(next_p2) => p2 = next_p2,
-                            None => break,
-                        }
                     }
-
-                    // c - 2^m
-                    let mut p2_sub = 1u64;
-                    while p2_sub < c {
-                        let diff = c - p2_sub;
-                        if diff <= max_shift {
-                            shifts.push(diff);
-                        }
-                        match p2_sub.checked_mul(2) {
-                            Some(next_p2) => p2_sub = next_p2,
-                            None => break,
-                        }
-                    }
-
-                    k += 1;
                 }
             }
 
@@ -254,20 +392,18 @@ impl TargetConjecture {
         }
         match self {
             Self::SunCubic2X3Y4 => {
-                // Complete verified list of exceptions < 10^8 for n = p + 2x^3 + y^4
                 matches!(
                     n,
-                    1 | 2 | 3 | 4 | 7 | 9 | 11 | 12 | 13 | 15 | 17 | 18 | 27 | 33 | 38
-                        | 42 | 52 | 53 | 67 | 80 | 95 | 109 | 165 | 193 | 235 | 239 | 454
+                    1..=4 | 7 | 9 | 11..=13 | 15 | 17..=18 | 27 | 33 | 38
+                        | 42 | 52..=53 | 67 | 80 | 95 | 109 | 165 | 193 | 235 | 239 | 454
                         | 552 | 1227
                 )
             }
             Self::SunCubicX32Y3 => {
-                // Complete verified list of exceptions < 10^8 for n = p + x^3 + 2y^3
-                matches!(n, 1 | 2 | 3 | 4 | 7 | 9 | 11 | 18 | 25 | 38 | 49 | 59 | 101)
+                matches!(n, 1..=4 | 7 | 9 | 11 | 18 | 25 | 38 | 49 | 59 | 101)
             }
-            Self::SunCentralBinomial => {
-                matches!(n, 1 | 2)
+            Self::SunCentralBinomial | Self::Binom2aPrime => {
+                matches!(n, 1..=2)
             }
             Self::SunFibonacciLucas => {
                 matches!(n, 1..=3)
@@ -279,279 +415,108 @@ impl TargetConjecture {
         }
     }
 
-    /// Deterministically verifies whether candidate `n` has ANY representation in the conjecture domain.
+    /// Runs the Mandatory Pre-Flight Validator on a small range (e.g. 10,000 .. 100,000).
+    /// Tests candidate density to guarantee that the target is a genuine open problem without trivial obstacles.
+    pub fn run_preflight_check(&self, start: u64, end: u64) -> PreflightReport {
+        let shifts = self.generate_shifts(end);
+        let mut tested_count = 0;
+        let mut exceptions = Vec::new();
+        let kind = self.prime_kind();
+
+        for n in start..=end {
+            if !self.is_valid_candidate(n) {
+                continue;
+            }
+            tested_count += 1;
+            let mut represented = false;
+
+            for &s in &shifts {
+                if s >= n {
+                    break;
+                }
+                let p = n - s;
+                let is_valid_prime = match kind {
+                    PrimeKind::Prime => crate::verifier::is_prime_fast(p),
+                    PrimeKind::TwinPrime => crate::verifier::is_twin_prime(p),
+                    PrimeKind::SophieGermain => crate::verifier::is_sophie_germain(p),
+                };
+                if is_valid_prime {
+                    represented = true;
+                    break;
+                }
+            }
+
+            if !represented {
+                exceptions.push(n);
+            }
+        }
+
+        let exceptions_count = exceptions.len();
+        // Rare exceptions (<= 100 out of thousands tested) -> Passed!
+        // > 200 exceptions -> Trivial / Density Insufficient
+        let passed = exceptions_count <= 100;
+        let verdict = if passed {
+            "✅ [PRE-FLIGHT PASSED: Nadir İstisnalı / Temiz Hedef - CRT Avına Uygun]"
+        } else {
+            "⚠️ [PRE-FLIGHT FAILED: Trivial / Yoğunluk Yetersiz]"
+        };
+
+        let sample_exceptions = exceptions.into_iter().take(20).collect();
+
+        PreflightReport {
+            target: *self,
+            start,
+            end,
+            tested_count,
+            exceptions_count,
+            sample_exceptions,
+            passed,
+            verdict,
+        }
+    }
+
+    /// Deterministically verifies whether candidate `n` can be represented in conjectured form.
     pub fn verify_candidate_deterministic(&self, n: u64) -> VerificationResult {
         if self.is_known_small_exception(n) {
             return VerificationResult::KnownSmallException;
         }
 
-        match self {
-            Self::SunTwinPrime => {
-                let mut p2 = 1u64;
-                while p2 < n {
-                    let mut p3 = 1u64;
-                    while p2 + p3 < n {
-                        let s = p2 + p3;
-                        let p = n - s;
-                        if is_twin_prime(p) {
-                            return VerificationResult::Represented {
-                                prime_part: p,
-                                shift: s,
-                                details: format!("{p} (twin prime: {p}, {}) + 2^{} + 3^{}", p + 2, p2.trailing_zeros(), ilog3(p3)),
-                            };
-                        }
-                        match p3.checked_mul(3) {
-                            Some(v) => p3 = v,
-                            None => break,
-                        }
-                    }
-                    match p2.checked_mul(2) {
-                        Some(v) => p2 = v,
-                        None => break,
-                    }
-                }
-                // No twin prime found: Counterexample!
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
+        let shifts = self.generate_shifts(n);
+        let kind = self.prime_kind();
+
+        for &s in &shifts {
+            if s >= n {
+                break;
             }
+            let p = n - s;
+            let is_valid_prime = match kind {
+                PrimeKind::Prime => is_prime(p),
+                PrimeKind::TwinPrime => is_twin_prime(p),
+                PrimeKind::SophieGermain => is_sophie_germain(p),
+            };
 
-            Self::SunSophieGermain => {
-                let mut p2 = 1u64;
-                while p2 < n {
-                    let mut p3 = 1u64;
-                    while p2 + p3 < n {
-                        let s = p2 + p3;
-                        let p = n - s;
-                        if is_sophie_germain(p) {
-                            return VerificationResult::Represented {
-                                prime_part: p,
-                                shift: s,
-                                details: format!("{p} (Sophie Germain: 2p+1={}) + 2^{} + 3^{}", 2 * p + 1, p2.trailing_zeros(), ilog3(p3)),
-                            };
-                        }
-                        match p3.checked_mul(3) {
-                            Some(v) => p3 = v,
-                            None => break,
-                        }
-                    }
-                    match p2.checked_mul(2) {
-                        Some(v) => p2 = v,
-                        None => break,
-                    }
-                }
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
+            if is_valid_prime {
+                return VerificationResult::Represented {
+                    prime_part: p,
+                    shift: s,
+                    details: format!("n = {} = {} + {}", n, p, s),
+                };
             }
+        }
 
-            Self::SunCubic2X3Y4 => {
-                let max_x = (((n as f64) / 2.0).cbrt().ceil() as u64).max(1);
-                for x in 1..=max_x {
-                    let x3_2 = 2 * x * x * x;
-                    if x3_2 >= n {
-                        break;
-                    }
-                    let mut y = 1u64;
-                    loop {
-                        let y4 = match y.checked_mul(y).and_then(|y2| y2.checked_mul(y2)) {
-                            Some(v) => v,
-                            None => break,
-                        };
-                        let s = x3_2 + y4;
-                        if s >= n {
-                            break;
-                        }
-                        let p = n - s;
-                        if is_prime(p) {
-                            return VerificationResult::Represented {
-                                prime_part: p,
-                                shift: s,
-                                details: format!("{p} + 2*({x})^3 + ({y})^4"),
-                            };
-                        }
-                        y += 1;
-                    }
-                }
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
-            }
-
-            Self::SunCubicX32Y3 => {
-                let max_x = ((n as f64).cbrt().ceil() as u64).max(1);
-                for x in 1..=max_x {
-                    let x3 = x * x * x;
-                    if x3 >= n {
-                        break;
-                    }
-                    let mut y = 1u64;
-                    loop {
-                        let y3_2 = match y.checked_mul(y).and_then(|y2| y2.checked_mul(y)).and_then(|v| v.checked_mul(2)) {
-                            Some(v) => v,
-                            None => break,
-                        };
-                        let s = x3 + y3_2;
-                        if s >= n {
-                            break;
-                        }
-                        let p = n - s;
-                        if is_prime(p) {
-                            return VerificationResult::Represented {
-                                prime_part: p,
-                                shift: s,
-                                details: format!("{p} + ({x})^3 + 2*({y})^3"),
-                            };
-                        }
-                        y += 1;
-                    }
-                }
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
-            }
-
-            Self::SunCentralBinomial => {
-                let mut k = 1u64;
-                loop {
-                    let c = central_binomial(k);
-                    if c == 0 || c >= n {
-                        break;
-                    }
-
-                    // c + 2^m
-                    let mut p2 = 1u64;
-                    while c + p2 < n {
-                        let s = c + p2;
-                        let p = n - s;
-                        if is_prime(p) {
-                            return VerificationResult::Represented {
-                                prime_part: p,
-                                shift: s,
-                                details: format!("{p} + binom({},{}) + 2^{}", 2 * k, k, p2.trailing_zeros()),
-                            };
-                        }
-                        match p2.checked_mul(2) {
-                            Some(v) => p2 = v,
-                            None => break,
-                        }
-                    }
-
-                    // c - 2^m
-                    let mut p2_sub = 1u64;
-                    while p2_sub < c {
-                        let s = c - p2_sub;
-                        if s < n {
-                            let p = n - s;
-                            if is_prime(p) {
-                                return VerificationResult::Represented {
-                                    prime_part: p,
-                                    shift: s,
-                                    details: format!("{p} + binom({},{}) - 2^{}", 2 * k, k, p2_sub.trailing_zeros()),
-                                };
-                            }
-                        }
-                        match p2_sub.checked_mul(2) {
-                            Some(v) => p2_sub = v,
-                            None => break,
-                        }
-                    }
-
-                    k += 1;
-                }
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
-            }
-
-            Self::SunFibonacciLucas => {
-                let fibs = generate_fibonacci(n);
-                let lucas = generate_lucas(n);
-                for (k, &f) in fibs.iter().enumerate() {
-                    for (m, &l) in lucas.iter().enumerate() {
-                        let s = f + l;
-                        if s >= n {
-                            break;
-                        }
-                        let p = n - s;
-                        if is_prime(p) {
-                            return VerificationResult::Represented {
-                                prime_part: p,
-                                shift: s,
-                                details: format!("{p} + F_{} ({f}) + L_{} ({l})", k + 1, m + 1),
-                            };
-                        }
-                    }
-                }
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
-            }
-
-            Self::SunPrimeSquareRomanov => {
-                // If n can be represented with q = 2:
-                // Check if (n - 2) = p^2 + 2^a
-                if n > 2 {
-                    let target = n - 2;
-                    let mut p2_pow = 1u64;
-                    while p2_pow < target {
-                        let rem = target - p2_pow;
-                        let sqrt_rem = (rem as f64).sqrt() as u64;
-                        if sqrt_rem * sqrt_rem == rem && is_prime(sqrt_rem) {
-                            return VerificationResult::Represented {
-                                prime_part: 2,
-                                shift: rem + p2_pow,
-                                details: format!("{}^2 + 2 (prime) + 2^{}", sqrt_rem, p2_pow.trailing_zeros()),
-                            };
-                        }
-                        match p2_pow.checked_mul(2) {
-                            Some(v) => p2_pow = v,
-                            None => break,
-                        }
-                    }
-                }
-
-                // General case: p prime, a >= 0 such that q = n - (p^2 + 2^a) is prime
-                let max_p = ((n as f64).sqrt().ceil() as u64).max(2);
-                let primes = crate::sieve::generate_base_primes(max_p);
-                for &p in &primes {
-                    let p2 = p * p;
-                    if p2 >= n {
-                        break;
-                    }
-                    let mut p2_pow = 1u64;
-                    while p2 + p2_pow < n {
-                        let s = p2 + p2_pow;
-                        let q = n - s;
-                        if is_prime(q) {
-                            return VerificationResult::Represented {
-                                prime_part: q,
-                                shift: s,
-                                details: format!("{p}^2 + {q} + 2^{}", p2_pow.trailing_zeros()),
-                            };
-                        }
-                        match p2_pow.checked_mul(2) {
-                            Some(v) => p2_pow = v,
-                            None => break,
-                        }
-                    }
-                }
-                VerificationResult::Counterexample {
-                    failed_shifts: self.generate_shifts(n),
-                }
-            }
+        VerificationResult::Counterexample {
+            failed_shifts: shifts,
         }
     }
 
-    /// Generates a complete mathematical proof of the counterexample.
-    /// Lists all shifts `s`, showing that `n - s` is composite with its smallest prime factor and prime factorization.
-    pub fn generate_proof(&self, n: u64) -> String {
+    /// Formats verified counterexample proof certificate.
+    pub fn format_counterexample_proof(&self, n: u64) -> String {
         let shifts = self.generate_shifts(n);
         if let Some(report) = verify_counterexample(n, &shifts) {
             return report.format_certificate(self.name());
         }
 
-        // Fallback formatting if somehow called on a represented number
+        // Fallback formatting
         let mut proof = String::new();
         proof.push_str("================================================================================\n");
         proof.push_str("MATHEMATICAL COUNTEREXAMPLE CERTIFICATE\n");
@@ -626,17 +591,6 @@ pub fn generate_lucas(limit: u64) -> Vec<u64> {
     lucas
 }
 
-/// Integer log base 3.
-#[inline(always)]
-fn ilog3(mut n: u64) -> u32 {
-    let mut power = 0;
-    while n >= 3 {
-        n /= 3;
-        power += 1;
-    }
-    power
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,23 +613,18 @@ mod tests {
     }
 
     #[test]
-    fn test_find_small_exceptions() {
-        let conj_b1 = TargetConjecture::SunCubic2X3Y4;
-        let mut b1_exceptions = Vec::new();
-        for n in 5..=50_000 {
-            if let VerificationResult::Counterexample { .. } = conj_b1.verify_candidate_deterministic(n) {
-                b1_exceptions.push(n);
-            }
+    fn test_preflight_checks() {
+        let targets = [
+            (TargetConjecture::Binom2aPrime, true),
+            (TargetConjecture::Twin2a3b, true),
+            (TargetConjecture::Sophie2a3b, true),
+            (TargetConjecture::Binom2aTwin, false), // Correctly identified as Trivial / Density Insufficient
+            (TargetConjecture::Erdos2a2bTwin, true),
+        ];
+        for (t, should_pass) in targets {
+            let report = t.run_preflight_check(10_000, 20_000);
+            println!("{}: passed={}, exceptions={}", t.short_code(), report.passed, report.exceptions_count);
+            assert_eq!(report.passed, should_pass, "Target {} preflight status mismatch", t.short_code());
         }
-        println!("B1 exceptions (5..50000): {:?}", b1_exceptions);
-
-        let conj_b2 = TargetConjecture::SunCubicX32Y3;
-        let mut b2_exceptions = Vec::new();
-        for n in 5..=50_000 {
-            if let VerificationResult::Counterexample { .. } = conj_b2.verify_candidate_deterministic(n) {
-                b2_exceptions.push(n);
-            }
-        }
-        println!("B2 exceptions (5..50000): {:?}", b2_exceptions);
     }
 }
