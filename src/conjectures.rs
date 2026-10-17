@@ -1,7 +1,6 @@
-//! Definitions of the 4 Zhi-Wei Sun / Erdős Open Conjecture targets.
-//! Provides shift generators, deterministic candidate verification, and algebraic proof builders.
-
-use crate::verifier::{format_factorization, is_prime, is_sophie_germain, is_twin_prime};
+use crate::verifier::{
+    format_factorization, is_prime, is_sophie_germain, is_twin_prime, verify_counterexample,
+};
 
 /// The supported open conjecture targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -545,20 +544,20 @@ impl TargetConjecture {
     }
 
     /// Generates a complete mathematical proof of the counterexample.
-    /// Lists all shifts `s`, showing that `n - s` is composite with its complete prime factorization.
+    /// Lists all shifts `s`, showing that `n - s` is composite with its smallest prime factor and prime factorization.
     pub fn generate_proof(&self, n: u64) -> String {
+        let shifts = self.generate_shifts(n);
+        if let Some(report) = verify_counterexample(n, &shifts) {
+            return report.format_certificate(self.name());
+        }
+
+        // Fallback formatting if somehow called on a represented number
         let mut proof = String::new();
-        proof.push_str(&format!("================================================================================\n"));
-        proof.push_str(&format!("MATHEMATICAL COUNTEREXAMPLE CERTIFICATE\n"));
-        proof.push_str(&format!("================================================================================\n"));
+        proof.push_str("================================================================================\n");
+        proof.push_str("MATHEMATICAL COUNTEREXAMPLE CERTIFICATE\n");
+        proof.push_str("================================================================================\n");
         proof.push_str(&format!("Target Conjecture: {}\n", self.name()));
         proof.push_str(&format!("Counterexample Integer: n = {}\n\n", n));
-        proof.push_str(&format!("Theorem: n = {} CANNOT be represented in the conjectured form.\n", n));
-        proof.push_str(&format!("Exhaustive Verification across the entire domain:\n"));
-        proof.push_str(&format!("--------------------------------------------------------------------------------\n"));
-
-        let shifts = self.generate_shifts(n);
-        let mut composite_count = 0;
         for s in shifts {
             if s >= n {
                 continue;
@@ -566,16 +565,8 @@ impl TargetConjecture {
             let diff = n - s;
             let fact_str = format_factorization(diff);
             proof.push_str(&format!("  s = {:<12} => n - s = {:<12} = {}\n", s, diff, fact_str));
-            composite_count += 1;
         }
-
-        proof.push_str(&format!("--------------------------------------------------------------------------------\n"));
-        proof.push_str(&format!("Total shifts tested: {}\n", composite_count));
-        proof.push_str(&format!("All (n - s) values have been deterministically proven composite via Miller-Rabin\n"));
-        proof.push_str(&format!("and explicitly factored. No valid prime representation exists.\n"));
-        proof.push_str(&format!("Q.E.D. Counterexample is mathematically sound and 100% verified.\n"));
-        proof.push_str(&format!("================================================================================\n"));
-
+        proof.push_str("================================================================================\n");
         proof
     }
 }
