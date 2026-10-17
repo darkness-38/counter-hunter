@@ -170,7 +170,7 @@ fn main() {
             let terms = if cli.end > 1_000_000_000 { 10_000_000 } else { cli.end as usize };
             counter_hunter::kimberling::hunt_kimberling(terms, cli.telemetry_interval, &cli.output);
         }
-        "permanent" | "sun-permanent" | "legendre" | "legendre-permanent" => {
+        "permanent" | "legendre" | "legendre-permanent" | "sun-trig" => {
             counter_hunter::permanent::run_legendre_permanent_hunt();
             counter_hunter::permanent::run_sun_trigonometric_conjecture_hunt();
         }
@@ -214,6 +214,12 @@ fn main() {
         }
         "wang-sun" | "wang-sun-circular" | "circular-sumset" | "wang" | "circular" => {
             counter_hunter::wang_sun_circular::hunt_wang_sun_circular();
+        }
+        "sun-catalog" | "permanent-catalog" | "sun-permanent" => {
+            counter_hunter::sun_permanent_catalog::run_sun_permanent_catalog_master();
+        }
+        "graph" | "graph-breaker" | "graph-conjecture" | "autographix" => {
+            counter_hunter::graph_conjecture_breaker::run_graph_conjecture_breaker_master();
         }
         _ => {
             if cli.low_bound_hunt {

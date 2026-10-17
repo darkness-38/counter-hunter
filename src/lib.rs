@@ -9,3 +9,5 @@ pub mod ppl087;
 pub mod low_bound_bounties;
 pub mod ppl043_breaker;
 pub mod wang_sun_circular;
+pub mod sun_permanent_catalog;
+pub mod graph_conjecture_breaker;
