@@ -184,16 +184,22 @@ fn main() {
             counter_hunter::ppl087::hunt_ppl087(config);
         }
         "low-bound" | "low-bound-bounties" | "bounties" => {
-            counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(cli.end.min(1_000_000), 25_000_000);
-            counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(2_000_000, 25_000_000);
+            let start_m = if cli.start == 0 { 3 } else { cli.start };
+            let end_m = if cli.end == 0 || cli.end == 100_000_000 { 5_000_000 } else { cli.end };
+            let n_sum = if cli.end == 0 || cli.end == 100_000_000 { 1_000_000 } else { cli.end as usize };
+            counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(start_m, end_m, 1_000_000_000);
+            counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(50_000_000, n_sum);
             counter_hunter::low_bound_bounties::hunt_hedef_c_square_pipi(cli.end.min(2_000_000), 25_000_000);
             counter_hunter::low_bound_bounties::hunt_hedef_d_group_cycles(500);
         }
         "hedef-a" | "a247824" | "divisibility" => {
-            counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(cli.end.min(2_000_000), 30_000_000);
+            let start_m = if cli.start == 0 { 3 } else { cli.start };
+            let end_m = if cli.end == 0 || cli.end == 100_000_000 { 5_000_000 } else { cli.end };
+            counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(start_m, end_m, 1_000_000_000);
         }
         "hedef-b" | "a181901" | "collisions" => {
-            counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(5_000_000, 30_000_000);
+            let n_sum = if cli.end == 0 || cli.end == 100_000_000 { 1_000_000 } else { cli.end as usize };
+            counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(50_000_000, n_sum);
         }
         "hedef-c" | "square-pipi" | "pipi" => {
             counter_hunter::low_bound_bounties::hunt_hedef_c_square_pipi(cli.end.min(5_000_000), 30_000_000);
@@ -203,8 +209,11 @@ fn main() {
         }
         _ => {
             if cli.low_bound_hunt {
-                counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(cli.end.min(1_000_000), 25_000_000);
-                counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(2_000_000, 25_000_000);
+                let start_m = if cli.start == 0 { 3 } else { cli.start };
+                let end_m = if cli.end == 0 || cli.end == 100_000_000 { 5_000_000 } else { cli.end };
+                let n_sum = if cli.end == 0 || cli.end == 100_000_000 { 1_000_000 } else { cli.end as usize };
+                counter_hunter::low_bound_bounties::hunt_hedef_a_divisibility(start_m, end_m, 1_000_000_000);
+                counter_hunter::low_bound_bounties::hunt_hedef_b_collisions(50_000_000, n_sum);
                 counter_hunter::low_bound_bounties::hunt_hedef_c_square_pipi(cli.end.min(2_000_000), 25_000_000);
                 counter_hunter::low_bound_bounties::hunt_hedef_d_group_cycles(500);
             } else if cli.run_all {

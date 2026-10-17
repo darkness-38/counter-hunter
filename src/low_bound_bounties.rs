@@ -10,26 +10,76 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
-/// Fast linear sieve for generating all primes up to `limit`.
+/// Fast odd-only bitset linear sieve for generating primes up to `limit`.
 pub fn sieve_primes(limit: usize) -> Vec<u32> {
-    let mut is_prime = vec![true; limit + 1];
-    is_prime[0] = false;
-    is_prime[1] = false;
-    let sqrt = (limit as f64).sqrt() as usize;
-    for i in 2..=sqrt {
-        if is_prime[i] {
-            let mut j = i * i;
-            while j <= limit {
-                is_prime[j] = false;
-                j += i;
+    if limit < 2 {
+        return Vec::new();
+    }
+    let num_odds = limit / 2;
+    let num_words = (num_odds + 63) / 64;
+    let mut composite = vec![0u64; num_words];
+    let sqrt_limit = (limit as f64).sqrt() as usize;
+    for i in (3..=sqrt_limit).step_by(2) {
+        let idx = (i - 3) / 2;
+        if (composite[idx / 64] & (1u64 << (idx % 64))) == 0 {
+            let step = i;
+            let mut mult_idx = (i * i - 3) / 2;
+            while mult_idx < num_odds {
+                composite[mult_idx / 64] |= 1u64 << (mult_idx % 64);
+                mult_idx += step;
             }
         }
     }
-    is_prime
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, &p)| if p { Some(idx as u32) } else { None })
-        .collect()
+    let mut primes = Vec::with_capacity((limit as f64 / (limit as f64).ln().max(1.0) * 1.15) as usize);
+    primes.push(2u32);
+    for idx in 0..num_odds {
+        if (composite[idx / 64] & (1u64 << (idx % 64))) == 0 {
+            primes.push((2 * idx + 3) as u32);
+        }
+    }
+    primes
+}
+
+/// Sieve exactly `target_count` primes up to Dusart's bound using compact odd-only bitset.
+pub fn sieve_n_primes(target_count: usize) -> Vec<u32> {
+    if target_count == 0 {
+        return Vec::new();
+    }
+    if target_count == 1 {
+        return vec![2];
+    }
+    let limit = if target_count <= 10 {
+        35
+    } else {
+        let n_f = target_count as f64;
+        (n_f * (n_f.ln() + n_f.ln().ln() + 0.1)) as usize
+    };
+    let num_odds = limit / 2;
+    let num_words = (num_odds + 63) / 64;
+    let mut composite = vec![0u64; num_words];
+    let sqrt_limit = (limit as f64).sqrt() as usize;
+    for i in (3..=sqrt_limit).step_by(2) {
+        let idx = (i - 3) / 2;
+        if (composite[idx / 64] & (1u64 << (idx % 64))) == 0 {
+            let step = i;
+            let mut mult_idx = (i * i - 3) / 2;
+            while mult_idx < num_odds {
+                composite[mult_idx / 64] |= 1u64 << (mult_idx % 64);
+                mult_idx += step;
+            }
+        }
+    }
+    let mut primes = Vec::with_capacity(target_count);
+    primes.push(2u32);
+    for idx in 0..num_odds {
+        if (composite[idx / 64] & (1u64 << (idx % 64))) == 0 {
+            primes.push((2 * idx + 3) as u32);
+            if primes.len() == target_count {
+                break;
+            }
+        }
+    }
+    primes
 }
 
 // ============================================================================
@@ -40,25 +90,35 @@ pub fn sieve_primes(limit: usize) -> Vec<u32> {
 #[derive(Debug, Clone)]
 pub struct DivisibilityChampion {
     pub m: u64,
+    pub p_m: u32,
     pub n: u64,
+    pub p_n: u32,
     pub ratio_m: f64,
     pub ratio_bound: f64,
 }
 
-/// Hunt for counterexamples to Sun's $500 Prize Conjecture on OEIS A247824.
-pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
+/// Hunt for counterexamples to Sun's $500 Prize Conjecture on OEIS A247824 up to m = max_m.
+pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
+    let effective_start = start_m.max(3);
+    let effective_end = max_m.max(effective_start);
+
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1;32m🎯 HEDEF A: OEIS A247824 — SUN'S $500 PRIZE PRIME DIVISIBILITY CONJECTURE\x1b[0m");
     println!("   Conjecture: For each m > 2, exists 1 <= n < m(m-1) such that (m + n) | (p_m + p_n)");
     println!("\x1b[1;36m================================================================================\x1b[0m");
-    println!("🔍 Search Range      : m = 3 .. {}", max_m);
-    println!("⚡ Sieve Prime Pool  : {} primes (up to {})", prime_limit, prime_limit);
+    println!("🔍 Search Range      : m = {} .. {}", effective_start, effective_end);
+    println!("⚡ Target Prime Pool : 50,000,000 primes (Vec<u32>, ~200 MB RAM)");
     println!("🧵 Multi-threading   : Rayon 8-Core Work Stealing");
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 
     let sieve_start = Instant::now();
-    let primes = sieve_primes(prime_limit);
-    println!("✓ Sieve completed: {} primes in {:.2?}\n", primes.len(), sieve_start.elapsed());
+    // Guarantee 50 million primes for large ranges
+    let primes = if prime_limit >= 982_451_653 || effective_end > 100_000 {
+        sieve_n_primes(50_000_000)
+    } else {
+        sieve_primes(prime_limit)
+    };
+    println!("✓ Sieved {} primes in {:.2?}. Prime p_50000000 = {}\n", primes.len(), sieve_start.elapsed(), primes.last().unwrap_or(&0));
 
     let num_primes = primes.len() as u64;
     let counterexamples_found = AtomicUsize::new(0);
@@ -67,16 +127,20 @@ pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
     let start_time = Instant::now();
     let mut last_telemetry = Instant::now();
 
-    // Scan m in smaller chunks for responsive telemetry
     let chunk_size = 5_000u64;
-    let mut current_m = 3u64;
+    let mut current_m = effective_start;
 
-    let mut top_champions: Vec<DivisibilityChampion> = Vec::new();
+    let mut record_highs: Vec<DivisibilityChampion> = Vec::new();
+    let mut record_ratios_m: Vec<DivisibilityChampion> = Vec::new();
+    let mut record_ratios_b: Vec<DivisibilityChampion> = Vec::new();
+    let mut uncharted_champions: Vec<DivisibilityChampion> = Vec::new();
+
+    let mut max_seen_n = 0u64;
     let mut max_ratio_m = 0.0f64;
     let mut max_ratio_bound = 0.0f64;
 
-    while current_m <= max_m {
-        let chunk_end = (current_m + chunk_size).min(max_m + 1);
+    while current_m <= effective_end {
+        let chunk_end = (current_m + chunk_size).min(effective_end + 1);
         let m_range: Vec<u64> = (current_m..chunk_end).collect();
 
         let chunk_results: Vec<(u64, Option<u64>)> = m_range
@@ -85,16 +149,23 @@ pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
                 if m > num_primes {
                     return (m, None);
                 }
-                let p_m = primes[(m - 1) as usize] as u64;
+                let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as u64;
                 let limit = m.saturating_mul(m - 1);
                 let max_n_check = limit.min(num_primes);
 
                 let mut found_n = None;
-                for n in 1..max_n_check {
-                    let p_n = primes[(n - 1) as usize] as u64;
-                    if (p_m + p_n) % (m + n) == 0 {
-                        found_n = Some(n);
-                        break;
+                // Fast path for n = 1 (p_1 = 2)
+                if (p_m + 2) % (m + 1) == 0 {
+                    found_n = Some(1);
+                } else {
+                    for n in 2..max_n_check {
+                        let p_n = unsafe { *primes.get_unchecked((n - 1) as usize) } as u64;
+                        let sum_p = p_m + p_n;
+                        let sum_idx = m + n;
+                        if sum_p % sum_idx == 0 {
+                            found_n = Some(n);
+                            break;
+                        }
                     }
                 }
                 (m, found_n)
@@ -103,41 +174,98 @@ pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
 
         for (m, res) in chunk_results {
             total_m_tested.fetch_add(1, Ordering::Relaxed);
+            let p_m = primes[(m - 1) as usize];
             match res {
                 Some(n) => {
-                    let limit = m * (m - 1);
+                    let limit = m.saturating_mul(m - 1);
+                    let p_n = primes[(n - 1) as usize];
+                    let r_m = (n as f64) / (m as f64);
+                    let r_b = (n as f64) / (limit as f64);
+
                     if n >= limit {
                         counterexamples_found.fetch_add(1, Ordering::SeqCst);
                         println!(
                             "\x1b[1;31m🚨🚨 $500 BOUNTY WON: COUNTEREXAMPLE AT m = {}! n = {} >= m(m-1) = {}! 🚨🚨\x1b[0m",
                             m, n, limit
                         );
-                    } else {
-                        let r_m = (n as f64) / (m as f64);
-                        let r_b = (n as f64) / (limit as f64);
-                        if r_m > max_ratio_m || r_b > max_ratio_bound {
-                            if r_m > max_ratio_m {
-                                max_ratio_m = r_m;
-                            }
-                            if r_b > max_ratio_bound {
-                                max_ratio_bound = r_b;
-                            }
-                            top_champions.push(DivisibilityChampion {
-                                m,
-                                n,
-                                ratio_m: r_m,
-                                ratio_bound: r_b,
+                        let _ = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open("discovered_counterexamples.txt")
+                            .map(|mut f| {
+                                use std::io::Write;
+                                writeln!(f, "HEDEF A COUNTEREXAMPLE: m = {}, p_m = {}, n = {}, p_n = {}, limit = {}", m, p_m, n, p_n, limit)
                             });
-                        }
+                    }
+
+                    let mut is_record = false;
+                    if n > max_seen_n {
+                        max_seen_n = n;
+                        record_highs.push(DivisibilityChampion {
+                            m,
+                            p_m,
+                            n,
+                            p_n,
+                            ratio_m: r_m,
+                            ratio_bound: r_b,
+                        });
+                        is_record = true;
+                    }
+
+                    if r_m > max_ratio_m {
+                        max_ratio_m = r_m;
+                        record_ratios_m.push(DivisibilityChampion {
+                            m,
+                            p_m,
+                            n,
+                            p_n,
+                            ratio_m: r_m,
+                            ratio_bound: r_b,
+                        });
+                        is_record = true;
+                    }
+
+                    if r_b > max_ratio_bound {
+                        max_ratio_bound = r_b;
+                        record_ratios_b.push(DivisibilityChampion {
+                            m,
+                            p_m,
+                            n,
+                            p_n,
+                            ratio_m: r_m,
+                            ratio_bound: r_b,
+                        });
+                        is_record = true;
+                    }
+
+                    if m > 400_000 && is_record {
+                        uncharted_champions.push(DivisibilityChampion {
+                            m,
+                            p_m,
+                            n,
+                            p_n,
+                            ratio_m: r_m,
+                            ratio_bound: r_b,
+                        });
+                        println!(
+                            "🌟 \x1b[1;32m[UNCHARTED RECORD]\x1b[0m m = {:7} (p_m = {:9}) -> n = {:9} (p_n = {:10}), n/m = {:6.2}, n/m(m-1) = {:.6}",
+                            m, p_m, n, p_n, r_m, r_b
+                        );
                     }
                 }
                 None => {
-                    if m * (m - 1) <= num_primes {
+                    let limit = m.saturating_mul(m - 1);
+                    if limit <= num_primes {
                         // Truly exhausted entire domain m(m-1)!
                         counterexamples_found.fetch_add(1, Ordering::SeqCst);
                         println!(
                             "\x1b[1;31m🚨🚨 $500 BOUNTY WON: NO n < m(m-1) EXISTS FOR m = {}! 🚨🚨\x1b[0m",
                             m
+                        );
+                    } else {
+                        println!(
+                            "\x1b[1;33m⚠️ [EXTREME PEAK CANDIDATE] m = {} (p_m = {}): n > 50,000,000 (limit = {})!\x1b[0m",
+                            m, p_m, limit
                         );
                     }
                 }
@@ -145,13 +273,14 @@ pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
         }
 
         let tested = total_m_tested.load(Ordering::Relaxed);
-        if last_telemetry.elapsed().as_secs() >= 5 || chunk_end > max_m {
+        let total_to_test = effective_end - effective_start + 1;
+        if last_telemetry.elapsed().as_secs() >= 5 || chunk_end > effective_end {
             let elapsed = start_time.elapsed().as_secs_f64();
-            let progress = (tested as f64) / (max_m as f64) * 100.0;
+            let progress = (tested as f64) / (total_to_test as f64) * 100.0;
             let rate = (tested as f64) / elapsed / 1000.0;
             println!(
-                "📡 [TELEMETRY] [{:5.1}%] m = {:8} | {:6.1} km/s | Max n/m: {:7.2} | Max n/m(m-1): {:8.4} | Tested: {}",
-                progress, chunk_end - 1, rate, max_ratio_m, max_ratio_bound, tested
+                "📡 [TELEMETRY] [{:5.1}%] m = {:8} | {:6.1} km/s | Max n: {:9} | Max n/m: {:7.2} | Max n/m(m-1): {:8.4} | Tested: {}",
+                progress, chunk_end - 1, rate, max_seen_n, max_ratio_m, max_ratio_bound, tested
             );
             last_telemetry = Instant::now();
         }
@@ -167,11 +296,19 @@ pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
     println!("   Total m Tested            : {}", tested);
     println!("   Time Elapsed              : {:.2}s ({:.1} km/s)", elapsed, (tested as f64) / elapsed / 1000.0);
     println!("   Counterexamples Found     : {}", counterexamples_found.load(Ordering::SeqCst));
-    println!("\n🏆 TOP NOTABLE CHAMPIONS (Extreme n/m and n/m(m-1) Ratios):");
-    println!("   {:>8} | {:>10} | {:>12} | {:>16}", "m", "n = a(m)", "n / m", "n / (m(m-1))");
-    println!("   {:-<54}", "");
-    for c in top_champions.iter().rev().take(10) {
-        println!("   {:>8} | {:>10} | {:>12.2} | {:>16.6}", c.m, c.n, c.ratio_m, c.ratio_bound);
+    println!("\n🏆 TOP NOTABLE RECORD HIGHS OF n = a(m):");
+    println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10} | {:>16}", "m", "p_m", "n = a(m)", "p_n", "n / m", "n / (m(m-1))");
+    println!("   {:-<76}", "");
+    for c in record_highs.iter().rev().take(10) {
+        println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10.2} | {:>16.6}", c.m, c.p_m, c.n, c.p_n, c.ratio_m, c.ratio_bound);
+    }
+    if !uncharted_champions.is_empty() {
+        println!("\n🌟 NOTABLE RECORDS IN UNCHARTED TERRITORY (m > 400,000):");
+        println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10} | {:>16}", "m", "p_m", "n = a(m)", "p_n", "n / m", "n / (m(m-1))");
+        println!("   {:-<76}", "");
+        for c in uncharted_champions.iter().rev().take(10) {
+            println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10.2} | {:>16.6}", c.m, c.p_m, c.n, c.p_n, c.ratio_m, c.ratio_bound);
+        }
     }
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 }
@@ -181,17 +318,19 @@ pub fn hunt_hedef_a_divisibility(max_m: u64, prime_limit: usize) {
 // ============================================================================
 
 /// Hunt for collisions in Sun's prime alternating sequence s_k and test A181901.
-pub fn hunt_hedef_b_collisions(max_k: usize, prime_limit: usize) {
+pub fn hunt_hedef_b_collisions(max_k: usize, max_n_sum: usize) {
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("\x1b[1;32m🎯 HEDEF B: OEIS A181901 — SUN'S PRIME SELF-RECURRENCE & COLLISION HUNTER\x1b[0m");
     println!("   Sequence: s_k = sum_{{j=1}}^k (-1)^{{k-j}} p_j = p_k - s_{{k-1}}");
     println!("   Conjecture: p_{{n+1}} is least modulus making {{2*s_1^2, ..., 2*s_n^2}} mod m distinct");
     println!("\x1b[1;36m================================================================================\x1b[0m");
-    println!("🔍 Search Depth      : k = 1 .. {}", max_k);
+    println!("🔍 Search Depth      : Exact Collisions up to k = {}", max_k);
+    println!("⚡ Modulo Sum Depth  : Mod p_{{n+1}} Sum Collisions up to n = {}", max_n_sum);
+    println!("🧵 Multi-threading   : Rayon 8-Core Work Stealing");
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 
     let sieve_start = Instant::now();
-    let primes = sieve_primes(prime_limit);
+    let primes = sieve_n_primes(max_k);
     println!("✓ Sieved {} primes in {:.2?}\n", primes.len(), sieve_start.elapsed());
 
     let actual_k = max_k.min(primes.len());
@@ -200,86 +339,100 @@ pub fn hunt_hedef_b_collisions(max_k: usize, prime_limit: usize) {
     let start_gen = Instant::now();
     let mut s = Vec::with_capacity(actual_k);
     let mut curr_s = 0i64;
-    for k in 0..actual_k {
-        let p_k = primes[k] as i64;
-        curr_s = p_k - curr_s;
-        s.push(curr_s);
+    let mut max_s = 0u32;
+    for &p in &primes {
+        curr_s = p as i64 - curr_s;
+        let u = curr_s as u32;
+        if u > max_s {
+            max_s = u;
+        }
+        s.push(u);
     }
-    println!("✓ Generated {} terms of s_k in {:.2?}\n", s.len(), start_gen.elapsed());
+    println!("✓ Generated {} terms of s_k in {:.2?}. Max s_k: {}\n", s.len(), start_gen.elapsed(), max_s);
 
-    // 2. Check for Exact Collisions (s_k = s_j)
-    println!("⚡ Scanning for Exact Collisions (s_k == s_j)...");
-    let max_val = *s.iter().max().unwrap_or(&0) as usize;
-    let mut seen = vec![0u32; max_val + 1];
-    let mut exact_collision: Option<(usize, usize, i64)> = None;
+    // 2. Check for Exact Collisions (s_k = s_j) via Compact 60MB Bitset
+    println!("⚡ Scanning for Exact Collisions (s_k == s_j) across {} terms...", actual_k);
+    let start_exact = Instant::now();
+    let bitset_size = (max_s as usize + 64) / 64;
+    let mut seen_bitset = vec![0u64; bitset_size];
+    let mut exact_collision: Option<(usize, u32)> = None;
 
     for (k, &val) in s.iter().enumerate() {
-        let v = val as usize;
-        if seen[v] != 0 {
-            exact_collision = Some((seen[v] as usize, k + 1, val));
+        let idx = val as usize;
+        let word = idx / 64;
+        let mask = 1u64 << (idx % 64);
+        if (seen_bitset[word] & mask) != 0 {
+            exact_collision = Some((k + 1, val));
             break;
         }
-        seen[v] = (k + 1) as u32;
+        seen_bitset[word] |= mask;
     }
 
     match exact_collision {
-        Some((j, k, val)) => {
+        Some((k, val)) => {
             println!(
-                "\x1b[1;31m🚨🚨 EXACT COLLISION FOUND: s_{} == s_{} == {}! Conjecture REFUTED for all n >= {}! 🚨🚨\x1b[0m\n",
-                j, k, val, k
+                "\x1b[1;31m🚨🚨 EXACT COLLISION FOUND: s_{} == {}! Conjecture REFUTED for all n >= {}! 🚨🚨\x1b[0m\n",
+                k, val, k
             );
         }
         None => {
-            println!("✓ Zero exact collisions in {} terms! (All s_k values are pairwise distinct)\n", actual_k);
+            println!("✓ Zero exact collisions in {} terms! (Checked in {:.2?}, pairwise distinct)\n", actual_k, start_exact.elapsed());
         }
     }
 
-    // 3. Check for Modulo p_{n+1} Sum Collisions (s_j + s_k = p_{n+1})
-    let test_n_limit = actual_k.min(50_000);
-    println!("⚡ Scanning for Modulo p_{{n+1}} Sum Collisions (s_j + s_k = p_{{n+1}}) up to n = {}...", test_n_limit);
+    // 3. Check for Modulo p_{n+1} Sum Collisions (s_j + s_k = p_{n+1}) via Rayon Parallel Bitsets
+    let test_n_limit = max_n_sum.min(actual_k - 1);
+    println!("⚡ Scanning for Modulo p_{{n+1}} Sum Collisions (s_j + s_k = p_{{n+1}}) up to n = {} with Rayon...", test_n_limit);
 
-    let sum_collisions = AtomicUsize::new(0);
+    let sum_start = Instant::now();
+    let max_val_prefix = s[..test_n_limit].iter().copied().max().unwrap_or(0) as usize;
 
-    // Use two-pointer approach on sorted prefix of s
-    let mut sorted_s = Vec::with_capacity(test_n_limit);
-    for n in 1..test_n_limit {
-        let new_elem = s[n - 1];
-        let ins_pos = sorted_s.binary_search(&new_elem).unwrap_or_else(|e| e);
-        sorted_s.insert(ins_pos, new_elem);
+    let chunk_size = 50_000usize;
+    let chunks: Vec<(usize, usize)> = (0..test_n_limit)
+        .step_by(chunk_size)
+        .map(|st| (st + 1, (st + chunk_size).min(test_n_limit)))
+        .collect();
 
-        let p_next = primes[n] as i64;
-
-        // Two-pointer check if any two distinct elements sum to p_next
-        let mut left = 0usize;
-        let mut right = sorted_s.len().saturating_sub(1);
-        let mut found = false;
-
-        while left < right {
-            let sum = sorted_s[left] + sorted_s[right];
-            if sum == p_next {
-                found = true;
-                sum_collisions.fetch_add(1, Ordering::Relaxed);
-                break;
-            } else if sum < p_next {
-                left += 1;
-            } else {
-                right -= 1;
+    let total_sum_collisions: usize = chunks
+        .into_par_iter()
+        .map(|(c_start, c_end)| {
+            let mut local_bitset = vec![0u64; (max_val_prefix + 64) / 64];
+            for i in 0..(c_start - 1) {
+                let v = s[i] as usize;
+                local_bitset[v / 64] |= 1u64 << (v % 64);
             }
-        }
 
-        if found {
-            println!(
-                "\x1b[1;33m⚠️ Sum Collision at n = {}: s_j + s_k = p_{{n+1}} = {}\x1b[0m",
-                n, p_next
-            );
-        }
-    }
+            let mut local_col = 0;
+            for n in c_start..=c_end {
+                let new_val = s[n - 1] as usize;
+                local_bitset[new_val / 64] |= 1u64 << (new_val % 64);
+
+                let p_next = primes[n] as usize;
+                let half_p = p_next / 2;
+                for j in 0..n {
+                    let val = s[j] as usize;
+                    if val <= half_p {
+                        let complement = p_next - val;
+                        if complement != val && complement <= max_val_prefix {
+                            let w = complement / 64;
+                            let m = 1u64 << (complement % 64);
+                            if (local_bitset[w] & m) != 0 {
+                                local_col += 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            local_col
+        })
+        .sum();
 
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("🏁 HEDEF B: SCAN COMPLETED");
     println!("   Total Terms s_k Evaluated : {}", actual_k);
     println!("   Exact Collisions          : {}", if exact_collision.is_some() { "1 (REFUTED)" } else { "0 (STABLE)" });
-    println!("   Mod p_{{n+1}} Sum Collisions: {}", sum_collisions.load(Ordering::Relaxed));
+    println!("   Mod p_{{n+1}} Sum Collisions: {} (Tested in {:.2?})", total_sum_collisions, sum_start.elapsed());
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 }
 
