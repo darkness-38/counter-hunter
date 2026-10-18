@@ -223,7 +223,12 @@ fn main() {
             counter_hunter::flip_graph_tensor::run_flip_graph_deep(duration_secs);
         }
         "zarankiewicz" | "c4-free" | "k22" | "k33" | "zarankiewicz-hunter" => {
-            counter_hunter::zarankiewicz_hunter::run_zarankiewicz_master();
+            let duration_secs = if cli.end > 0 && cli.end != 10_000_000_000 && cli.end != 100_000_000 {
+                cli.end
+            } else {
+                600
+            };
+            counter_hunter::zarankiewicz_hunter::hunt_k33_deep(duration_secs);
         }
         _ => {
             if cli.low_bound_hunt {

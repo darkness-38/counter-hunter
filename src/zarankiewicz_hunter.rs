@@ -7,7 +7,10 @@
 //! Uses Cyclic Difference Sets (Singer difference sets / PG(2,4)), projective plane submatrices,
 //! and multi-threaded bitwise Tabu Search / Simulated Annealing with Rayon.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::io::Write;
 use rayon::prelude::*;
 
 /// Compute the exact Reiman upper bound for z(n; 2, 2)
@@ -434,10 +437,313 @@ pub fn run_zarankiewicz_master() {
             "🏆 [K_{{3,3}}-FREE n = {:2}] Ones: {:3} / KST Bound: {:3} ({:5.1}%) | Verified: {} | Time: {:.2?}",
             n, record.max_ones, record.theoretical_bound, ratio, record.verified, t0.elapsed()
         );
-        if n == 21 || n == 15 {
-            print_matrix_certificate(&record);
+    }
+}
+
+/// Verified 120-ones K_{3,3}-free seed for n = 15
+pub fn seed_15_120() -> Vec<u64> {
+    vec![
+        0x0016F1, 0x000D3B, 0x00585D, 0x001BCA, 0x0071B8,
+        0x006A72, 0x0024DE, 0x0029E5, 0x004397, 0x00322F,
+        0x004EAC, 0x003F14, 0x007C83, 0x006749, 0x005566,
+    ]
+}
+
+/// Retrieve or compute an initial >= 120 ones K_{3,3}-free matrix for n = 15
+pub fn initial_seed_15(rng: &mut ZarankiewiczRng) -> Vec<u64> {
+    let s = seed_15_120();
+    if verify_k33_free(&s, 15) && matrix_weight(&s) >= 120 {
+        return s;
+    }
+    let mut best = submatrix_seed(15);
+    greedy_complete_k33(&mut best, 15, rng);
+    let mut best_score = matrix_weight(&best);
+    for _ in 0..10_000 {
+        if best_score >= 120 {
+            break;
+        }
+        let mut cand = best.clone();
+        let num_rem = 1 + rng.gen_range(3);
+        for _ in 0..num_rem {
+            let r = rng.gen_range(15);
+            if cand[r] != 0 {
+                let ones: Vec<usize> = (0..15).filter(|&c| (cand[r] & (1u64 << c)) != 0).collect();
+                if !ones.is_empty() {
+                    cand[r] &= !(1u64 << ones[rng.gen_range(ones.len())]);
+                }
+            }
+        }
+        greedy_complete_k33(&mut cand, 15, rng);
+        let sc = matrix_weight(&cand);
+        if sc > best_score {
+            best_score = sc;
+            best = cand;
         }
     }
+    best
+}
+
+/// Retrieve or compute an initial >= 126 ones K_{3,3}-free matrix for n = 16
+pub fn initial_seed_16(rng: &mut ZarankiewiczRng) -> Vec<u64> {
+    let mut best = submatrix_seed(16);
+    greedy_complete_k33(&mut best, 16, rng);
+    let mut best_score = matrix_weight(&best);
+    for _ in 0..10_000 {
+        if best_score >= 126 {
+            break;
+        }
+        let mut cand = best.clone();
+        let num_rem = 1 + rng.gen_range(3);
+        for _ in 0..num_rem {
+            let r = rng.gen_range(16);
+            if cand[r] != 0 {
+                let ones: Vec<usize> = (0..16).filter(|&c| (cand[r] & (1u64 << c)) != 0).collect();
+                if !ones.is_empty() {
+                    cand[r] &= !(1u64 << ones[rng.gen_range(ones.len())]);
+                }
+            }
+        }
+        greedy_complete_k33(&mut cand, 16, rng);
+        let sc = matrix_weight(&cand);
+        if sc > best_score {
+            best_score = sc;
+            best = cand;
+        }
+    }
+    best
+}
+
+/// Save breakthrough record certificate to file
+pub fn save_zarankiewicz_breakthrough(n: usize, ones: usize, rows: &[u64]) {
+    let filename = "ZARANKIEWICZ_RECORD_121.txt";
+    let mut file = match std::fs::File::create(filename) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to create {}: {}", filename, e);
+            return;
+        }
+    };
+    let verified = verify_k33_free(rows, n);
+    writeln!(file, "================================================================================").unwrap();
+    writeln!(file, "🚨 ZARANKIEWICZ RECORD BREAKTHROUGH CERTIFICATE").unwrap();
+    writeln!(file, "Kind: K_{{3,3}}-free bipartite adjacency matrix").unwrap();
+    writeln!(file, "Dimension n: {} x {}", n, n).unwrap();
+    writeln!(file, "Total 1s: {}", ones).unwrap();
+    writeln!(file, "Verified K_{{3,3}}-free: {}", verified).unwrap();
+    writeln!(file, "================================================================================").unwrap();
+    writeln!(file, "Hex Bitmasks:").unwrap();
+    for (i, &r) in rows.iter().enumerate() {
+        write!(file, "Row {:2} [0x{:06X}]: ", i, r).unwrap();
+        for col in 0..n {
+            if (r & (1u64 << col)) != 0 {
+                write!(file, "1").unwrap();
+            } else {
+                write!(file, ".").unwrap();
+            }
+        }
+        writeln!(file, " (deg={})", r.count_ones()).unwrap();
+    }
+    writeln!(file, "\nRust Array Representation:").unwrap();
+    writeln!(file, "pub const ZARANKIEWICZ_RECORD_{}_{}: [u64; {}] = [", n, ones, n).unwrap();
+    for &r in rows {
+        writeln!(file, "    0x{:06X},", r).unwrap();
+    }
+    writeln!(file, "];").unwrap();
+    println!("💾 Certificate successfully written to {}", filename);
+}
+
+/// Continuous Tabu/Annealing local search hunter for K_{3,3}-free record matrices.
+/// Strictly limited to 2 Rayon worker threads.
+pub fn hunt_k33_deep(duration_secs: u64) {
+    println!("\n╔═══════════════════════════════════════════════════════════════════════════════╗");
+    println!("║  ZARANKIEWICZ CONTINUOUS DEEP RECORD HUNTER (2 THREADS / LIGHTWEIGHT)        ║");
+    println!("║  Targets: n = 15 (>= 121 ones), n = 16 (>= 127 ones)                          ║");
+    println!("║  Duration: {}s ({} min)                                                     ║", duration_secs, duration_secs / 60);
+    println!("╚═══════════════════════════════════════════════════════════════════════════════╝\n");
+
+    let running = Arc::new(AtomicBool::new(true));
+    let total_steps = Arc::new(AtomicU64::new(0));
+    let best_15 = Arc::new(AtomicUsize::new(120));
+    let best_16 = Arc::new(AtomicUsize::new(126));
+
+    let running_monitor = Arc::clone(&running);
+    let total_steps_monitor = Arc::clone(&total_steps);
+    let best_15_monitor = Arc::clone(&best_15);
+    let best_16_monitor = Arc::clone(&best_16);
+
+    let start_time = Instant::now();
+
+    // Telemetry monitor thread: outputs live status every 5 seconds
+    let monitor_handle = std::thread::spawn(move || {
+        let mut last_steps: u64 = 0;
+        let mut last_time = Instant::now();
+        while running_monitor.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_secs(5));
+            let elapsed = start_time.elapsed().as_secs();
+            let steps = total_steps_monitor.load(Ordering::Relaxed);
+            let dt = last_time.elapsed().as_secs_f64();
+            let d_steps = steps.saturating_sub(last_steps);
+            let rate_m = if dt > 0.0 { (d_steps as f64) / (dt * 1e6) } else { 0.0 };
+            last_steps = steps;
+            last_time = Instant::now();
+
+            let b15 = best_15_monitor.load(Ordering::Relaxed);
+            let b16 = best_16_monitor.load(Ordering::Relaxed);
+            let mins = elapsed / 60;
+            let secs = elapsed % 60;
+
+            println!(
+                "📡 [ZARANKIEWICZ TELEMETRY {:02}:{:02}] {:5.2} M steps/s | n=15 Best: {:3} (Target: >=121) | n=16 Best: {:3} (Target: >=127) | Total: {:6.2} M steps",
+                mins, secs, rate_m, b15, b16, (steps as f64) / 1e6
+            );
+
+            if duration_secs > 0 && elapsed >= duration_secs {
+                println!("\n⏱️ Time limit of {}s reached. Gracefully stopping workers...", duration_secs);
+                running_monitor.store(false, Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
+    // Strictly limit Rayon to 2 threads
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .thread_name(|i| format!("zarankiewicz-worker-{}", i))
+        .build()
+        .expect("Failed to build 2-thread Rayon pool");
+
+    let targets = [(15, 121), (16, 127)];
+
+    pool.install(|| {
+        targets.par_iter().enumerate().for_each(|(worker_id, &(n, target_record))| {
+            let mut rng = ZarankiewiczRng::new(
+                0xa5a5_5a5a_3c3c_c3c3 ^ ((worker_id as u64 + 1) * 0x9e3779b97f4a7c15)
+            );
+
+            let initial_seed = if n == 15 {
+                initial_seed_15(&mut rng)
+            } else {
+                initial_seed_16(&mut rng)
+            };
+
+            let global_best = if n == 15 { &best_15 } else { &best_16 };
+            let seed_weight = matrix_weight(&initial_seed);
+            global_best.fetch_max(seed_weight, Ordering::Relaxed);
+
+            println!(
+                "🧵 Worker {} online: n = {} (initial seed weight: {}, target: >={})",
+                worker_id, n, seed_weight, target_record
+            );
+
+            let mut current = initial_seed.clone();
+            let mut current_score = seed_weight;
+            let mut best = current.clone();
+            let mut best_score = current_score;
+
+            let mut order: Vec<(usize, usize)> = Vec::with_capacity(n * n);
+            let mut local_steps: u64 = 0;
+
+            while running.load(Ordering::Relaxed) {
+                local_steps += 1;
+                if (local_steps & 0x7FFF) == 0 {
+                    total_steps.fetch_add(0x8000, Ordering::Relaxed);
+                }
+
+                let mut candidate = current.clone();
+
+                // 1-flip / perturbation: remove 1 (or occasionally 2-3) ones
+                let removals = if rng.gen_range(100) < 85 {
+                    1
+                } else if rng.gen_range(100) < 95 {
+                    2
+                } else {
+                    3
+                };
+
+                for _ in 0..removals {
+                    let r = rng.gen_range(n);
+                    if candidate[r] != 0 {
+                        let mut ones = [0usize; 64];
+                        let mut n_ones = 0;
+                        for c in 0..n {
+                            if (candidate[r] & (1u64 << c)) != 0 {
+                                ones[n_ones] = c;
+                                n_ones += 1;
+                            }
+                        }
+                        if n_ones > 0 {
+                            let c = ones[rng.gen_range(n_ones)];
+                            candidate[r] &= !(1u64 << c);
+                        }
+                    }
+                }
+
+                // Fast greedy completion into candidate
+                order.clear();
+                for r in 0..n {
+                    for c in 0..n {
+                        if (candidate[r] & (1u64 << c)) == 0 {
+                            order.push((r, c));
+                        }
+                    }
+                }
+                for i in (1..order.len()).rev() {
+                    let j = rng.gen_range(i + 1);
+                    order.swap(i, j);
+                }
+                for &(r, c) in &order {
+                    if can_add_one_k33(&candidate, n, r, c) {
+                        candidate[r] |= 1u64 << c;
+                    }
+                }
+
+                let cand_score = matrix_weight(&candidate);
+
+                if cand_score > best_score {
+                    best_score = cand_score;
+                    best = candidate.clone();
+                    global_best.fetch_max(best_score, Ordering::Relaxed);
+
+                    if cand_score >= target_record {
+                        let valid = verify_k33_free(&best, n);
+                        if valid {
+                            println!(
+                                "\n🚨 [ZARANKIEWICZ WORLD RECORD BROKEN!] n = {}, Total 1s = {} (Target was >= {})",
+                                n, cand_score, target_record
+                            );
+                            save_zarankiewicz_breakthrough(n, cand_score, &best);
+                        }
+                    }
+                }
+
+                if cand_score >= current_score {
+                    current = candidate;
+                    current_score = cand_score;
+                } else {
+                    let delta = current_score - cand_score;
+                    let accept_prob = if delta == 1 { 5 } else { 0 };
+                    if rng.gen_range(1000) < accept_prob {
+                        current = candidate;
+                        current_score = cand_score;
+                    } else if rng.gen_range(50_000) == 0 {
+                        current = best.clone();
+                        current_score = best_score;
+                    }
+                }
+            }
+
+            if (local_steps & 0x7FFF) != 0 {
+                total_steps.fetch_add(local_steps & 0x7FFF, Ordering::Relaxed);
+            }
+        });
+    });
+
+    let _ = monitor_handle.join();
+
+    println!("\n🏁 Deep hunt finished. Best n=15: {}, Best n=16: {}",
+        best_15.load(Ordering::Relaxed),
+        best_16.load(Ordering::Relaxed)
+    );
 }
 
 #[cfg(test)]
@@ -488,5 +794,14 @@ mod tests {
             0b1000u64,
         ];
         assert!(!verify_k33_free(&rows, 4));
+    }
+
+    #[test]
+    fn test_seed_15_120_validity() {
+        let mut rng = ZarankiewiczRng::new(42);
+        let s = initial_seed_15(&mut rng);
+        assert_eq!(s.len(), 15);
+        assert!(verify_k33_free(&s, 15));
+        assert!(matrix_weight(&s) >= 120);
     }
 }
