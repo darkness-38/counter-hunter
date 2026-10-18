@@ -167,9 +167,9 @@ Table~\ref{tab:quadrillion} presents the exact empirical parameters and results 
 
 \begin{table}[htbp]
 \centering
-\small
 \caption{CRT Covering Sniper verification parameters and results up to $10^{15}$.}
 \label{tab:quadrillion}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{llrrrrr}
 \toprule
 \textbf{Target Conjecture} & \textbf{Equation} & $M_{\text{master}}$ & $R_{\text{master}}$ & \textbf{Killed \%} & $k$-\textbf{Steps} & \textbf{CE} \\
@@ -179,7 +179,8 @@ Table~\ref{tab:quadrillion} presents the exact empirical parameters and results 
 \texttt{b-cubic1}       & $n = p + 2x^3 + y^4$           & $33,426,748,355$  & $13,938,133,558$ & $65.3\%$ & $29,916$ & $0$ \\
 \texttt{sun-prize-2a5b} & $n = p + 2^a + 5^b$            & $200,560,490,130$ & $171,980,495,832$ & $87.4\%$ & $4,986$ & $0$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \subsection{Legendre Symbol Permanents ($p = 5 \dots 53$)}
@@ -281,10 +282,10 @@ We implemented the \textbf{3-Phase Algebraic Inversion and Resonance Sniper}:
 
 Empirical execution revealed clear asymptotic $k$-clusters:
 \begin{itemize}
-    \item \textbf{Cluster $k = 20$ ($n \approx 7 \times 10^7$):} $m = 10,409$ yields $n = 69,804,276$ ($p_n = 1,396,184,219$), $n/m = 6,706.15$, $n/(m(m-1)) \approx 0.6443$.
-    \item \textbf{Cluster $k = 21$ ($n \approx 1.8 \times 10^8$):} $m = 35,980$ yields $n = 180,302,246$ ($p_n = 3,786,675,019$), $n/m = 5,011.18$, $n/(m(m-1)) \approx 0.1393$.
-    \item \textbf{Cluster $k = 22$ ($n \approx 4.66 \times 10^8$):} $m = 84,719$ yields $n = 466,501,110$ ($p_n = 10,263,801,991$), $n/m = 5,506.45$, $n/(m(m-1)) \approx 0.0650$.
-    \item \textbf{All-Time Global Record $k = 24$ ($n > 3.14 \times 10^9$):} Candidate $m = 79,276$ ($p_m = 1,010,431$) survived all candidates below $n = 5 \times 10^8$. Phase 3 jumped across the 50-billion prime dead zone to Band $k = 24$, discovering the exact solution $n = 3,141,281,384$ ($p_n = 75,391,645,409$) with 128-bit verified quotient $(p_m + p_n)/(m + n) = 24$, setting the global all-time record $n/m = 39,624.62$ while strictly honoring $n / (m(m-1)) = 0.499838 < 1.0$.
+    \item \textbf{Cluster $k = 20$ ($n \approx 7 \times 10^7$):} $m = 10,409$ yields $n = 69,804,276$ ($p_n = 1,396,184,219$), $n/m = 6,706.15$, with $n/(m(m-1)) \approx 0.6443$.
+    \item \textbf{Cluster $k = 21$ ($n \approx 1.8 \times 10^8$):} $m = 35,980$ yields $n = 180,302,246$ ($p_n = 3,786,675,019$), $n/m = 5,011.18$, with $n/(m(m-1)) \approx 0.1393$.
+    \item \textbf{Cluster $k = 22$ ($n \approx 4.66 \times 10^8$):} $m = 84,719$ yields $n = 466,501,110$ ($p_n = 10,263,801,991$), $n/m = 5,506.45$, with ratio $n/(m(m-1)) \approx 0.0650$.
+    \item \textbf{All-Time Global Record $k = 24$ ($n > 3.14 \times 10^9$):} Candidate $m = 79,276$ ($p_m = 1,010,431$) survived below $n = 5 \times 10^8$. Phase 3 jumped the 50-billion prime dead zone to Band $k = 24$, discovering $n = 3,141,281,384$ ($p_n = 75,391,645,409$) with verified quotient $(p_m + p_n)/(m + n) = 24$. This establishes the global record $n/m = 39,624.62$, while strictly satisfying $n / (m(m-1)) = 0.499838 < 1.0$.
 \end{itemize}
 In all cases, $n < m(m-1)$ holds strictly with zero counterexamples. Table~\ref{tab:a247824} summarizes key champion records.
 
@@ -449,19 +450,20 @@ Combining multi-prime evaluations through Garner's Chinese Remainder Algorithm i
 
 \begin{table}[htbp]
 \centering
-\small
 \caption{Exact cyclotomic CRT reconstruction and divisibility verification for higher odd composites ($n \ge 49$).}
 \label{tab:sun_composites}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{ccrrrc}
 \toprule
-$n$ & $m = \frac{n-1}{2}$ & Time & Exact Integer $s_n$ & Exact Integer $t_n$ & Divisibility \\
+$n$ & $m = \frac{n-1}{2}$ & Time & Exact Integer $s_n$ & Exact Integer $t_n$ & Divisibility Verification \\
 \midrule
-49 & 24 & 3.02s & 3,078,195,713,761 & 2,985,079,009,667,296,402,667,908,856,545,280 & $s_n \equiv 0, t_n \equiv 0 \pmod{49}$ \\
-51 & 25 & 6.23s & 113,109,498,706,113 & 3,312,500,525,972,220,248,144,194,924,707,84 & $s_n \equiv 0, t_n \equiv 0 \pmod{51}$ \\
+49 & 24 & 3.02s & 3,078,195,713,761 & 2,985,079,009,667,296,402,667,908,856,545,280 & $s_{49} \equiv 0, \; t_{49} \equiv 0 \pmod{49}$ \\
+51 & 25 & 6.23s & 113,109,498,706,113 & 3,312,500,525,972,220,248,144,194,924,707,84 & $s_{51} \equiv 0, \; t_{51} \equiv 0 \pmod{51}$ \\
 55 & 27 & 12.22s & 9,553,828,212,328,125 & $[t_{55} > 2^{126} \text{ bits}]$ & $s_{55} \equiv 0 \pmod{55}$ \\
 57 & 28 & 25.40s & 89,237,136,634,668,369 & $[t_{57} > 2^{126} \text{ bits}]$ & $s_{57} \equiv 0 \pmod{57}$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \paragraph{Refutation of Conjecture 4.6(ii).}
@@ -475,12 +477,13 @@ Thus, every prime $p \equiv 5 \pmod{12}$ for $p \ge 29$ strictly violates Conjec
 
 \begin{table}[htbp]
 \centering
-\scriptsize
-\caption{Comprehensive 6-Matrix Permanent Catalog across odd primes $p \in [5, 53]$ ($m = (p-1)/2$).}
+\caption{Comprehensive 6-Matrix Permanent Catalog across odd primes $p \in [5, 53]$ ($m = (p-1)/2$). Here $P_1 = \operatorname{per}[(\frac{j+k}{p})]$, $P_2 = \operatorname{per}[(\frac{j^2+k^2}{p})]$, $P_3 = \operatorname{per}[(\frac{j^2-k^2}{p})]$, $P_4 = \operatorname{per}[(\frac{j^2+jk+k^2}{p})]$, $P_5 = \operatorname{per}[(\frac{j^3+k^3}{p})]$, and $P_6 = \operatorname{per}[\tan(\frac{\pi(j-k)}{p})] \pmod{p^2}$.}
 \label{tab:6family_permanent}
+\resizebox{\textwidth}{!}{%
+\setlength{\tabcolsep}{5pt}
 \begin{tabular}{ccrrrrrr}
 \toprule
-$p$ & $m$ & $P_1 = \operatorname{per}\left[\left(\frac{j+k}{p}\right)\right]$ & $P_2 = \operatorname{per}\left[\left(\frac{j^2+k^2}{p}\right)\right]$ & $P_3 = \operatorname{per}\left[\left(\frac{j^2-k^2}{p}\right)\right]$ & $P_4 = \operatorname{per}\left[\left(\frac{j^2+jk+k^2}{p}\right)\right]$ & $P_5 = \operatorname{per}\left[\left(\frac{j^3+k^3}{p}\right)\right]$ & $P_6 \pmod{p^2}$ \\
+$p$ & $m$ & $P_1$ & $P_2$ & $P_3$ & $P_4$ & $P_5$ & $P_6 \pmod{p^2}$ \\
 \midrule
 5  & 2  & 0 & 1 & 1 & 2 & 0 & 6 \\
 7  & 3  & 2 & 2 & 0 & -3 & -2 & 36 \\
@@ -497,7 +500,8 @@ $p$ & $m$ & $P_1 = \operatorname{per}\left[\left(\frac{j+k}{p}\right)\right]$ & 
 47 & 23 & -2,192,572,416 & 126,104,895,488 & 0 & 3,424,975,323,136 & 8,103,395,328 & 1,664 \\
 53 & 26 & 2,967,176,478,720 & 84,431,907,480,881 & 84,431,907,480,881 & 259,179,021,336,576 & 1,131,455,447,040 & 1,785 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 The computed catalog rigorously establishes:
