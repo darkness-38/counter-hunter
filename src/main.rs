@@ -218,17 +218,15 @@ fn main() {
         "sun-catalog" | "permanent-catalog" | "sun-permanent" => {
             counter_hunter::sun_permanent_catalog::run_sun_permanent_catalog_master();
         }
+        "exact" | "exact-solvers" | "solvers" => {
+            counter_hunter::flip_graph_tensor::run_tensor_solver_master();
+            counter_hunter::zarankiewicz_hunter::run_exact_zarankiewicz_master();
+        }
         "flip-graph" | "tensor" | "matrix-multiplication" | "kauers" | "tensor-rank" | "flip-deep" => {
-            let duration_secs = if cli.end == 10_000_000_000 { 0 } else { cli.end };
-            counter_hunter::flip_graph_tensor::run_flip_graph_deep(duration_secs);
+            counter_hunter::flip_graph_tensor::run_tensor_solver_master();
         }
         "zarankiewicz" | "c4-free" | "k22" | "k33" | "zarankiewicz-hunter" => {
-            let duration_secs = if cli.end > 0 && cli.end != 10_000_000_000 && cli.end != 100_000_000 {
-                cli.end
-            } else {
-                600
-            };
-            counter_hunter::zarankiewicz_hunter::hunt_k33_deep(duration_secs);
+            counter_hunter::zarankiewicz_hunter::run_exact_zarankiewicz_master();
         }
         _ => {
             if cli.low_bound_hunt {
