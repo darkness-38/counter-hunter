@@ -1090,12 +1090,12 @@ pub fn save_rank22_certificate(terms: &[(u32, u32, u32)]) {
     println!("💾 Saved exact rank 22 certificate to {}", filename);
 }
 
-/// Systematic Z_3 x Z_3 Trilinear Orbit Symmetry Scanner for <3, 3, 3> Rank 22
+/// Systematic 6 Orbit + 4 Free Joker Targeted Subspace Scanner for <3, 3, 3> Rank 22
 pub fn hunt_symmetric_rank22(duration_secs: u64) {
     println!("\n╔═══════════════════════════════════════════════════════════════════════════════╗");
-    println!("║  Z_3 x Z_3 TRILINEAR SYMMETRY ORBIT SCANNER FOR <3, 3, 3> RANK R = 22        ║");
-    println!("║  Structure: 7 Orbits of size 3 + 1 Diagonal Fixed Point = 22 Terms            ║");
-    println!("║  Time Limit: {} seconds (Cold Execution / Analytical Subspace Descent)        ║", duration_secs);
+    println!("║  6 ORBIT + 4 FREE JOKER TARGETED SUBSPACE SOLVER FOR <3,3,3> RANK R = 22      ║");
+    println!("║  Structure: 6 Orbits of size 3 (18 terms) + 4 Free Joker Terms = 22 Terms     ║");
+    println!("║  Time Limit: {} seconds (Cold Execution / Analytical Residual Targeting)      ║", duration_secs);
     println!("╚═══════════════════════════════════════════════════════════════════════════════╝\n");
 
     let t0 = Instant::now();
@@ -1103,7 +1103,34 @@ pub fn hunt_symmetric_rank22(duration_secs: u64) {
     let mut targets = [0u128; 9];
     targets.copy_from_slice(&target_vec);
 
-    // 1. Precompute 168 sparse orbit representatives of size 3 in F_2^{3x3}
+    let laderman = laderman_23_decomposition();
+
+    // 1. Base 18 orbit terms (6 groups of 3 terms)
+    let mut base_18 = [(0u32, 0u32); 18];
+    for i in 0..18 {
+        base_18[i] = (laderman.terms[i].0, laderman.terms[i].1);
+    }
+
+    // 2. Base 5 rank-1 single-entry jokers covering the 5 residual error coordinates {24, 29, 52, 55, 80}
+    let base_jokers: [(u32, u32); 5] = [
+        (laderman.terms[18].0, laderman.terms[18].1), // J0: coord 24
+        (laderman.terms[19].0, laderman.terms[19].1), // J1: coord 52
+        (laderman.terms[20].0, laderman.terms[20].1), // J2: coord 29
+        (laderman.terms[21].0, laderman.terms[21].1), // J3: coord 55
+        (laderman.terms[22].0, laderman.terms[22].1), // J4: coord 80
+    ];
+
+    // 3. Precompute sparse vectors with 1, 2, or 3 ones for free joker pairs
+    let mut sparse_vectors = Vec::with_capacity(130);
+    for m in 1..512u32 {
+        let ones = m.count_ones();
+        if ones >= 1 && ones <= 3 {
+            sparse_vectors.push(m);
+        }
+    }
+    sparse_vectors.sort_by_key(|&m| m.count_ones());
+
+    // 4. Precompute 168 distinct orbit representatives for the 6 orbit generators
     let mut orbit_reps = Vec::with_capacity(168);
     let mut seen = [false; 512];
     for m in 1..512u32 {
@@ -1121,36 +1148,22 @@ pub fn hunt_symmetric_rank22(duration_secs: u64) {
     }
     orbit_reps.sort_by_key(|&m| m.count_ones());
 
-    let fixed_points = [
-        (0x100u32, 0x100u32), // e_{2,2} x e_{2,2}
-        (0x111u32, 0x111u32), // I_3 x I_3
-        (0x010u32, 0x010u32), // e_{1,1} x e_{1,1}
-        (0x001u32, 0x001u32), // e_{0,0} x e_{0,0}
-    ];
+    println!("✓ 18 Base Orbit Terms Loaded from Laderman F_2 decomposition.");
+    println!("✓ 5 Base Residual Coordinate Jokers: Coords {{24, 29, 52, 55, 80}} mapped.");
+    println!("✓ Precomputed {} sparse rank-1 vectors and {} Z_3 orbit representatives.", sparse_vectors.len(), orbit_reps.len());
 
-    println!("✓ Precomputed {} distinct Z_3 orbit representatives (sorted by Hamming weight).", orbit_reps.len());
-    println!("✓ Loaded {} diagonal fixed-point configurations.", fixed_points.len());
-
-    // 2. Base 7 generator pairs derived from Laderman's 23 decomposition:
-    let laderman = laderman_23_decomposition();
-    let mut base_generators: [(u32, u32); 7] = [
-        (laderman.terms[0].0, laderman.terms[0].1),
-        (laderman.terms[1].0, laderman.terms[1].1),
-        (laderman.terms[6].0, laderman.terms[6].1),
-        (laderman.terms[9].0, laderman.terms[9].1),
-        (laderman.terms[11].0, laderman.terms[11].1),
-        (laderman.terms[15].0, laderman.terms[15].1),
-        (laderman.terms[18].0, laderman.terms[18].1),
-    ];
-    let _base_fixed = (0x100u32, 0x100u32);
-
+    // Initial baseline evaluation with first 4 jokers:
     let mut test_pairs = [(0u32, 0u32); 22];
-    for i in 0..22 {
-        test_pairs[i] = (laderman.terms[i].0, laderman.terms[i].1);
+    for i in 0..18 {
+        test_pairs[i] = base_18[i];
     }
+    test_pairs[18] = base_jokers[0];
+    test_pairs[19] = base_jokers[1];
+    test_pairs[20] = base_jokers[2];
+    test_pairs[21] = base_jokers[3];
 
     let (base_solved, base_err, _) = solve_w_gauss_jordan_22(&test_pairs, &targets);
-    println!("✓ Baseline Algebraic Subspace Distance: Slices Solved = {}/9 | Error Bits = {} bit!\n", base_solved, base_err);
+    println!("✓ Baseline 18 Orbits + 4 Jokers: Slices Solved = {}/9 | Error Bits = {} bit!\n", base_solved, base_err);
 
     let mut best_solved = base_solved;
     let mut min_error = base_err;
@@ -1158,22 +1171,39 @@ pub fn hunt_symmetric_rank22(duration_secs: u64) {
     let mut last_telemetry = Instant::now();
     let mut breakthrough_found = false;
 
-    // 3. Systematic search over single and double generator perturbations
-    'search_loop: for fixed in fixed_points {
-        for gen_idx in 0..7 {
-            let orig_gen = base_generators[gen_idx];
-            for &rep_u in &orbit_reps {
-                for &rep_v in &orbit_reps {
-                    total_evaluated += 1;
-                    base_generators[gen_idx] = (rep_u, rep_v);
+    // 5. Targeted Subspace Search:
+    // Try all 5 combinations of 4 jokers out of 5, then systematically vary jokers and orbit terms
+    let joker_subsets = [
+        [0, 1, 2, 3], // omits J4 (coord 80)
+        [0, 1, 2, 4], // omits J3 (coord 55)
+        [0, 1, 3, 4], // omits J2 (coord 29)
+        [0, 2, 3, 4], // omits J1 (coord 52)
+        [1, 2, 3, 4], // omits J0 (coord 24)
+    ];
 
-                    for k in 0..7 {
-                        let (u, v) = base_generators[k];
-                        test_pairs[3 * k] = (u, v);
-                        test_pairs[3 * k + 1] = (z3_shift(u), z3_shift(v));
-                        test_pairs[3 * k + 2] = (z3_shift_2(u), z3_shift_2(v));
+    'outer_search: for &sub in &joker_subsets {
+        let mut cur_jokers = [
+            base_jokers[sub[0]],
+            base_jokers[sub[1]],
+            base_jokers[sub[2]],
+            base_jokers[sub[3]],
+        ];
+
+        // Phase A: Vary 1 of the 4 jokers across the entire sparse vector space
+        for j_slot in 0..4 {
+            let orig_joker = cur_jokers[j_slot];
+            for &u_j in &sparse_vectors {
+                for &v_j in &sparse_vectors {
+                    total_evaluated += 1;
+                    cur_jokers[j_slot] = (u_j, v_j);
+
+                    for i in 0..18 {
+                        test_pairs[i] = base_18[i];
                     }
-                    test_pairs[21] = fixed;
+                    test_pairs[18] = cur_jokers[0];
+                    test_pairs[19] = cur_jokers[1];
+                    test_pairs[20] = cur_jokers[2];
+                    test_pairs[21] = cur_jokers[3];
 
                     let (solved, err, w_opt) = solve_w_gauss_jordan_22(&test_pairs, &targets);
                     if err < min_error || (err == min_error && solved > best_solved) {
@@ -1182,7 +1212,7 @@ pub fn hunt_symmetric_rank22(duration_secs: u64) {
                     }
 
                     if solved == 9 && err == 0 {
-                        println!("\n🚨 [HISTORIC BREAKTHROUGH: <3,3,3> RANK 22 EXACT SOLUTION FOUND!]");
+                        println!("\n🚨 [HISTORIC BREAKTHROUGH: <3,3,3> RANK 22 EXACT ZERO-ERROR SCHEME FOUND!]");
                         let w_matrices = w_opt.expect("W matrices must be present");
                         let terms: Vec<(u32, u32, u32)> = test_pairs
                             .iter()
@@ -1193,7 +1223,7 @@ pub fn hunt_symmetric_rank22(duration_secs: u64) {
                         let decomp = TensorDecomposition::new(3, 3, 3, terms);
                         print_algebraic_decomposition(&decomp);
                         breakthrough_found = true;
-                        break 'search_loop;
+                        break 'outer_search;
                     }
 
                     if last_telemetry.elapsed().as_secs() >= 3 {
@@ -1201,32 +1231,92 @@ pub fn hunt_symmetric_rank22(duration_secs: u64) {
                         let rate_k = (total_evaluated as f64) / (elapsed * 1000.0);
                         let elapsed_sec = elapsed as u64;
                         println!(
-                            "📡 [SYMMETRIC RANK-22 SCAN {:02}:{:02}] Evaluated: {:8} classes | Best Slices: {}/9 | Min Error: {} bit(s) | Rate: {:6.2} K/s",
+                            "📡 [6*3 + 4 JOKER SCAN {:02}:{:02}] Evaluated: {:8} classes | Best Slices: {}/9 | Min Error: {} bit(s) | Rate: {:6.2} K/s",
                             elapsed_sec / 60, elapsed_sec % 60, total_evaluated, best_solved, min_error, rate_k
                         );
                         last_telemetry = Instant::now();
 
                         if elapsed_sec >= duration_secs {
-                            break 'search_loop;
+                            break 'outer_search;
                         }
                     }
                 }
             }
-            base_generators[gen_idx] = orig_gen;
+            cur_jokers[j_slot] = orig_joker;
+        }
+
+        // Phase B: Perturb 1 of the 6 orbit terms while maintaining the 4 targeted jokers
+        for orbit_idx in 0..6 {
+            let orig_term = base_18[orbit_idx * 3];
+            for &rep_u in &orbit_reps {
+                for &rep_v in &orbit_reps {
+                    total_evaluated += 1;
+                    base_18[orbit_idx * 3] = (rep_u, rep_v);
+                    base_18[orbit_idx * 3 + 1] = (z3_shift(rep_u), z3_shift(rep_v));
+                    base_18[orbit_idx * 3 + 2] = (z3_shift_2(rep_u), z3_shift_2(rep_v));
+
+                    for i in 0..18 {
+                        test_pairs[i] = base_18[i];
+                    }
+                    test_pairs[18] = cur_jokers[0];
+                    test_pairs[19] = cur_jokers[1];
+                    test_pairs[20] = cur_jokers[2];
+                    test_pairs[21] = cur_jokers[3];
+
+                    let (solved, err, w_opt) = solve_w_gauss_jordan_22(&test_pairs, &targets);
+                    if err < min_error || (err == min_error && solved > best_solved) {
+                        min_error = err;
+                        best_solved = solved;
+                    }
+
+                    if solved == 9 && err == 0 {
+                        println!("\n🚨 [HISTORIC BREAKTHROUGH: <3,3,3> RANK 22 EXACT ZERO-ERROR SCHEME FOUND!]");
+                        let w_matrices = w_opt.expect("W matrices must be present");
+                        let terms: Vec<(u32, u32, u32)> = test_pairs
+                            .iter()
+                            .zip(w_matrices.iter())
+                            .map(|(&(u, v), &w)| (u, v, w))
+                            .collect();
+                        save_rank22_certificate(&terms);
+                        let decomp = TensorDecomposition::new(3, 3, 3, terms);
+                        print_algebraic_decomposition(&decomp);
+                        breakthrough_found = true;
+                        break 'outer_search;
+                    }
+
+                    if last_telemetry.elapsed().as_secs() >= 3 {
+                        let elapsed = t0.elapsed().as_secs_f64();
+                        let rate_k = (total_evaluated as f64) / (elapsed * 1000.0);
+                        let elapsed_sec = elapsed as u64;
+                        println!(
+                            "📡 [6*3 + 4 JOKER SCAN {:02}:{:02}] Evaluated: {:8} classes | Best Slices: {}/9 | Min Error: {} bit(s) | Rate: {:6.2} K/s",
+                            elapsed_sec / 60, elapsed_sec % 60, total_evaluated, best_solved, min_error, rate_k
+                        );
+                        last_telemetry = Instant::now();
+
+                        if elapsed_sec >= duration_secs {
+                            break 'outer_search;
+                        }
+                    }
+                }
+            }
+            base_18[orbit_idx * 3] = orig_term;
+            base_18[orbit_idx * 3 + 1] = (z3_shift(orig_term.0), z3_shift(orig_term.1));
+            base_18[orbit_idx * 3 + 2] = (z3_shift_2(orig_term.0), z3_shift_2(orig_term.1));
         }
     }
 
     let elapsed_total = t0.elapsed();
     println!("\n================================================================================");
-    println!("🏁 [SYMMETRIC RANK-22 SCAN COMPLETED]");
-    println!("   Total Candidate Orbit Classes Evaluated : {}", total_evaluated);
+    println!("🏁 [6*3 + 4 JOKER SCAN COMPLETED]");
+    println!("   Total Candidate Classes Evaluated       : {}", total_evaluated);
     println!("   Total Wall-Clock Time Elapsed           : {:.2?}", elapsed_total);
     println!("   Maximum Slices Solved in Span           : {} / 9", best_solved);
     println!("   Minimum Algebraic Rank Error Achieved   : {} bit(s)", min_error);
     if breakthrough_found {
-        println!("   Status                                  : 🚨 BREAKTHROUGH CERTIFICATE SAVED!");
+        println!("   Status                                  : 🚨 BREAKTHROUGH ZERO-ERROR CERTIFICATE SAVED!");
     } else {
-        println!("   Algebraic Finding                       : Bound verified within 1-bit algebraic distance of F_2^81 boundary.");
+        println!("   Algebraic Finding                       : 6-orbit + 4-joker manifold evaluated across targeted coordinate space.");
     }
     println!("================================================================================\n");
 }
