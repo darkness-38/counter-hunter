@@ -218,8 +218,9 @@ fn main() {
         "sun-catalog" | "permanent-catalog" | "sun-permanent" => {
             counter_hunter::sun_permanent_catalog::run_sun_permanent_catalog_master();
         }
-        "flip-graph" | "tensor" | "matrix-multiplication" | "kauers" | "tensor-rank" => {
-            counter_hunter::flip_graph_tensor::run_flip_graph_master();
+        "flip-graph" | "tensor" | "matrix-multiplication" | "kauers" | "tensor-rank" | "flip-deep" => {
+            let duration_secs = if cli.end > 0 && cli.end != 10_000_000_000 { cli.end } else { 30 };
+            counter_hunter::flip_graph_tensor::run_flip_graph_deep(duration_secs);
         }
         "zarankiewicz" | "c4-free" | "k22" | "k33" | "zarankiewicz-hunter" => {
             counter_hunter::zarankiewicz_hunter::run_zarankiewicz_master();

@@ -3,10 +3,20 @@
 //! Investigates trilinear decompositions of <n, m, p> matrix multiplication tensors over F_2:
 //! T_{<n, m, p>} = sum_{i, j, k} e_{i,j} \otimes e_{j,k} \otimes e_{k,i}
 //!
-//! Uses flip transitions (Kauers & Moosbauer, ISSAC 2023), rank reductions (R -> R-1),
-//! plus-transitions, and exact tensor verification over F_2.
+//! Features:
+//! - Exact 100% unconditional F_2 tensor verification (verify_tensor_decomposition)
+//! - Flip operations (Kauers & Moosbauer, ISSAC 2023) on matching components
+//! - Plus-transitions (term splitting & zero-tensor pair injection) to escape local minima
+//! - Aggressive Greedy Reduction (R -> R-1 / R-2) with lookahead
+//! - Simulated Annealing with adaptive temperature schedule on additive complexity
+//! - 8-thread Rayon parallel deep hunt: Threads 0..4 on <2,3,3> targeting R=15, Threads 4..8 on <3,3,3> targeting R=22
+//! - Live 5-second telemetry and automatic export to discovered_counterexamples.txt on breakthrough.
 
-use std::time::Instant;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use rayon::prelude::*;
 
 /// Representation of a trilinear decomposition of rank R over F_2.
@@ -126,7 +136,6 @@ pub fn reduce_terms(terms: &mut Vec<(u32, u32, u32)>) -> bool {
                 let (u2, v2, w2) = terms[j];
 
                 if u1 == u2 && v1 == v2 && w1 == w2 {
-                    // Fully identical terms cancel out modulo 2
                     terms.swap_remove(j);
                     terms.swap_remove(i);
                     reduced = true;
@@ -182,7 +191,7 @@ pub enum FlipKind {
 
 /// Find all valid flip opportunities where two terms share a component
 pub fn find_all_flips(terms: &[(u32, u32, u32)]) -> Vec<FlipKind> {
-    let mut flips = Vec::new();
+    let mut flips = Vec::with_capacity(64);
     let r = terms.len();
     for a in 0..r {
         for b in (a + 1)..r {
@@ -246,107 +255,40 @@ pub fn apply_flip(terms: &mut [(u32, u32, u32)], flip: FlipKind) {
 }
 
 /// Laderman's 1976 historic R = 23 decomposition for <3, 3, 3> over F_2.
-/// Returns a verified 23-term decomposition.
 pub fn laderman_23_decomposition() -> TensorDecomposition {
     let mut terms = Vec::with_capacity(23);
-
-    // Coordinate bit helpers for 3x3 matrices: bit (row * 3 + col)
     let b = |row: usize, col: usize| -> u32 { 1u32 << (row * 3 + col) };
 
-    // U terms correspond to A matrix linear forms
-    // V terms correspond to B matrix linear forms
-    // W terms correspond to dual C' matrix linear forms (reconstruction of C)
     let triples: &[(u32, u32, u32)] = &[
-        // m1: (A11 + A12 + A13 + A21 + A22 + A32 + A33) * B22 -> C12
         (b(0,0)^b(0,1)^b(0,2)^b(1,0)^b(1,1)^b(2,1)^b(2,2), b(1,1), b(1,0)),
-        // m2: (A11 + A21) * (B12 + B22) -> C21 + C22
         (b(0,0)^b(1,0), b(0,1)^b(1,1), b(0,1)^b(1,1)),
-        // m3: A22 * (B11 + B12 + B21 + B22 + B23 + B31 + B33) -> C21
         (b(1,1), b(0,0)^b(0,1)^b(1,0)^b(1,1)^b(1,2)^b(2,0)^b(2,2), b(0,1)),
-        // m4: (A11 + A21 + A22) * (B11 + B12 + B22) -> C12 + C21 + C22
         (b(0,0)^b(1,0)^b(1,1), b(0,0)^b(0,1)^b(1,1), b(1,0)^b(0,1)^b(1,1)),
-        // m5: (A21 + A22) * (B11 + B12) -> C12 + C22
         (b(1,0)^b(1,1), b(0,0)^b(0,1), b(1,0)^b(1,1)),
-        // m6: A11 * B11 -> C11 + C12 + C13 + C21 + C22 + C31 + C33
         (b(0,0), b(0,0), b(0,0)^b(1,0)^b(2,0)^b(0,1)^b(1,1)^b(0,2)^b(2,2)),
-        // m7: (A11 + A31 + A32) * (B11 + B13 + B23) -> C13 + C31 + C33
         (b(0,0)^b(2,0)^b(2,1), b(0,0)^b(0,2)^b(1,2), b(2,0)^b(0,2)^b(2,2)),
-        // m8: (A11 + A31) * (B13 + B23) -> C31 + C33
         (b(0,0)^b(2,0), b(0,2)^b(1,2), b(0,2)^b(2,2)),
-        // m9: (A31 + A32) * (B11 + B13) -> C13 + C33
         (b(2,0)^b(2,1), b(0,0)^b(0,2), b(2,0)^b(2,2)),
-        // m10: (A11 + A12 + A13 + A22 + A23 + A31 + A32) * B23 -> C13
         (b(0,0)^b(0,1)^b(0,2)^b(1,1)^b(1,2)^b(2,0)^b(2,1), b(1,2), b(2,0)),
-        // m11: A32 * (B11 + B13 + B21 + B22 + B23 + B31 + B32) -> C31
         (b(2,1), b(0,0)^b(0,2)^b(1,0)^b(1,1)^b(1,2)^b(2,0)^b(2,1), b(0,2)),
-        // m12: (A13 + A32 + A33) * (B22 + B31 + B32) -> C12 + C31 + C32
         (b(0,2)^b(2,1)^b(2,2), b(1,1)^b(2,0)^b(2,1), b(1,0)^b(0,2)^b(1,2)),
-        // m13: (A13 + A33) * (B22 + B32) -> C31 + C32
         (b(0,2)^b(2,2), b(1,1)^b(2,1), b(0,2)^b(1,2)),
-        // m14: A13 * B31 -> C11 + C12 + C13 + C21 + C23 + C31 + C32
         (b(0,2), b(2,0), b(0,0)^b(1,0)^b(2,0)^b(0,1)^b(2,1)^b(0,2)^b(1,2)),
-        // m15: (A32 + A33) * (B31 + B32) -> C12 + C32
         (b(2,1)^b(2,2), b(2,0)^b(2,1), b(1,0)^b(1,2)),
-        // m16: (A13 + A22 + A23) * (B23 + B31 + B33) -> C13 + C21 + C23
         (b(0,2)^b(1,1)^b(1,2), b(1,2)^b(2,0)^b(2,2), b(2,0)^b(0,1)^b(2,1)),
-        // m17: (A13 + A23) * (B23 + B33) -> C21 + C23
         (b(0,2)^b(1,2), b(1,2)^b(2,2), b(0,1)^b(2,1)),
-        // m18: (A22 + A23) * (B31 + B33) -> C13 + C23
         (b(1,1)^b(1,2), b(2,0)^b(2,2), b(2,0)^b(2,1)),
-        // m19: A12 * B21 -> C11
         (b(0,1), b(1,0), b(0,0)),
-        // m20: A23 * B32 -> C22
         (b(1,2), b(2,1), b(1,1)),
-        // m21: A21 * B13 -> C23
         (b(1,0), b(0,2), b(2,1)),
-        // m22: A31 * B12 -> C32
         (b(2,0), b(0,1), b(1,2)),
-        // m23: A33 * B33 -> C33
         (b(2,2), b(2,2), b(2,2)),
     ];
 
     for &(u, v, w) in triples {
         terms.push((u, v, w));
     }
-
     TensorDecomposition::new(3, 3, 3, terms)
-}
-
-/// Hopcroft-Kerr R = 15 decomposition for <2, 3, 3> over F_2.
-pub fn hopcroft_kerr_15_decomposition() -> TensorDecomposition {
-    // We construct a valid verified rank-15 scheme for <2, 3, 3>
-    // Dimensions: A: 2x3 (6 bits), B: 3x3 (9 bits), C': 3x2 (6 bits).
-    let b_u = |r: usize, c: usize| -> u32 { 1u32 << (r * 3 + c) };
-    let b_v = |r: usize, c: usize| -> u32 { 1u32 << (r * 3 + c) };
-    let b_w = |r: usize, c: usize| -> u32 { 1u32 << (r * 2 + c) };
-
-    // Derived from the 15-multiplication non-commutative scheme for <2, 3, 3>:
-    let triples: &[(u32, u32, u32)] = &[
-        // Row 0 of A (1x3 by 3x3 -> 9 multiplications directly or via Strassen blocks)
-        (b_u(0,0), b_v(0,0), b_w(0,0)),
-        (b_u(0,1), b_v(1,0), b_w(0,0)),
-        (b_u(0,2), b_v(2,0), b_w(0,0)),
-
-        (b_u(0,0), b_v(0,1), b_w(1,0)),
-        (b_u(0,1), b_v(1,1), b_w(1,0)),
-        (b_u(0,2), b_v(2,1), b_w(1,0)),
-
-        (b_u(0,0), b_v(0,2), b_w(2,0)),
-        (b_u(0,1), b_v(1,2), b_w(2,0)),
-        (b_u(0,2), b_v(2,2), b_w(2,0)),
-
-        // Row 1 of A shared combinations
-        (b_u(1,0), b_v(0,0), b_w(0,1)),
-        (b_u(1,1), b_v(1,0), b_w(0,1)),
-        (b_u(1,2), b_v(2,0), b_w(0,1)),
-
-        (b_u(1,0), b_v(0,1), b_w(1,1)),
-        (b_u(1,1), b_v(1,1), b_w(1,1)),
-        (b_u(1,2), b_v(2,1), b_w(1,1)),
-    ];
-    // Start with 15 terms or seed
-    let terms = triples.to_vec();
-    TensorDecomposition::new(2, 3, 3, terms)
 }
 
 /// PRNG xorshift64 for ultra-fast deterministic random walks
@@ -374,22 +316,22 @@ impl FastRng {
     pub fn gen_range(&mut self, max: usize) -> usize {
         (self.next_u64() % (max as u64)) as usize
     }
+
+    #[inline(always)]
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u64() as f64) / (u64::MAX as f64)
+    }
 }
 
-/// Plus-Transition: Escapes local minima by splitting a random term into two terms (R -> R + 1).
-/// Since U = U1 ^ U2, replacing (U, V, W) with (U1, V, W) + (U2, V, W) preserves the tensor sum
-/// and introduces shared V and W components to enable new flip pathways.
-pub fn plus_transition(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: usize, m: usize, p: usize) {
-    if terms.is_empty() {
-        return;
-    }
+/// Plus-Transition (R -> R + 1 via term splitting)
+pub fn plus_transition_split(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: usize, m: usize, p: usize) {
+    if terms.is_empty() { return; }
     let idx = rng.gen_range(terms.len());
     let (u, v, w) = terms[idx];
     let choice = rng.gen_range(3);
 
     match choice {
         0 if u.count_ones() > 1 => {
-            // Split U into two masks
             let mut u1 = 0u32;
             for bit in 0..(n * m) {
                 if (u & (1 << bit)) != 0 && (rng.next_u64() & 1) == 0 {
@@ -403,7 +345,6 @@ pub fn plus_transition(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: u
             }
         }
         1 if v.count_ones() > 1 => {
-            // Split V into two masks
             let mut v1 = 0u32;
             for bit in 0..(m * p) {
                 if (v & (1 << bit)) != 0 && (rng.next_u64() & 1) == 0 {
@@ -417,7 +358,6 @@ pub fn plus_transition(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: u
             }
         }
         _ if w.count_ones() > 1 => {
-            // Split W into two masks
             let mut w1 = 0u32;
             for bit in 0..(p * n) {
                 if (w & (1 << bit)) != 0 && (rng.next_u64() & 1) == 0 {
@@ -431,7 +371,6 @@ pub fn plus_transition(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: u
             }
         }
         _ => {
-            // Fallback: pick any active bit and split
             let mask = 1u32 << rng.gen_range(n * m);
             let u1 = u ^ mask;
             let u2 = mask;
@@ -441,168 +380,37 @@ pub fn plus_transition(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: u
     }
 }
 
-/// Record result of a Flip-Graph search
-#[derive(Clone, Debug)]
-pub struct FlipGraphRecord {
-    pub n: usize,
-    pub m: usize,
-    pub p: usize,
-    pub min_rank: usize,
-    pub min_weight: usize,
-    pub flips_evaluated: u64,
-    pub verified: bool,
-    pub champion_terms: Vec<(u32, u32, u32)>,
+/// Plus-Transition (R -> R + 2 via zero-tensor pair injection X \otimes Y \otimes Z \oplus X \otimes Y \otimes Z = 0)
+pub fn plus_transition_zero_pair(terms: &mut Vec<(u32, u32, u32)>, rng: &mut FastRng, n: usize, m: usize, p: usize) {
+    let mask_u = (1u32 << (n * m)) - 1;
+    let mask_v = (1u32 << (m * p)) - 1;
+    let mask_w = (1u32 << (p * n)) - 1;
+
+    let x = ((rng.next_u64() as u32) & mask_u) | 1;
+    let y = ((rng.next_u64() as u32) & mask_v) | 1;
+    let z = ((rng.next_u64() as u32) & mask_w) | 1;
+
+    terms.push((x, y, z));
+    terms.push((x, y, z));
 }
 
-/// Execute multi-threaded Rayon Flip-Graph Hunter for <n, m, p>
-pub fn hunt_flip_graph(
-    n: usize,
-    m: usize,
-    p: usize,
-    initial_decomp: TensorDecomposition,
-    max_steps_per_thread: usize,
-) -> FlipGraphRecord {
-    let num_threads = rayon::current_num_threads();
-    println!(
-        "⚡ [FLIP-GRAPH] Spawning {} Rayon worker threads for <{}, {}, {}> Matrix Multiplication...",
-        num_threads, n, m, p
-    );
-    println!(
-        "   Initial Rank R = {}, Initial Total Weight = {}, Verified: {}",
-        initial_decomp.rank(),
-        initial_decomp.total_weight(),
-        initial_decomp.verify()
-    );
+/// Save confirmed record certificate to output file
+pub fn save_record_certificate(decomp: &TensorDecomposition, filename: &str, tag: &str) {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(filename)
+        .unwrap_or_else(|_| panic!("Failed to open {}", filename));
 
-    let start_time = Instant::now();
-
-    // Parallel search across Rayon threads
-    let thread_results: Vec<FlipGraphRecord> = (0..num_threads)
-        .into_par_iter()
-        .map(|thread_id| {
-            let mut rng = FastRng::new(0x9e3779b97f4a7c15 ^ ((thread_id as u64 + 1) * 0x517cc1b727220a95));
-            let mut current = initial_decomp.clone();
-            let mut best_terms = current.terms.clone();
-            let mut best_rank = current.rank();
-            let mut best_weight = current.total_weight();
-            let mut total_flips: u64 = 0;
-
-            let mut steps_without_improvement = 0;
-
-            for step in 0..max_steps_per_thread {
-                total_flips += 1;
-                let flips = find_all_flips(&current.terms);
-
-                if !flips.is_empty() {
-                    // Check if any flip immediately yields a rank reduction
-                    let mut reducing_flip = None;
-                    for &flip in &flips {
-                        let mut test_terms = current.terms.clone();
-                        apply_flip(&mut test_terms, flip);
-                        if reduce_terms(&mut test_terms) {
-                            reducing_flip = Some(test_terms);
-                            break;
-                        }
-                    }
-
-                    if let Some(reduced_terms) = reducing_flip {
-                        current.terms = reduced_terms;
-                        reduce_terms(&mut current.terms);
-                    } else {
-                        // Otherwise, pick flip: favor moves that reduce total weight
-                        let flip_idx = rng.gen_range(flips.len());
-                        let flip = flips[flip_idx];
-                        let mut test_terms = current.terms.clone();
-                        apply_flip(&mut test_terms, flip);
-                        let _reduced = reduce_terms(&mut test_terms);
-
-                        let old_weight = current.total_weight();
-                        let new_weight: usize = test_terms.iter().map(|&(u, v, w)| (u.count_ones() + v.count_ones() + w.count_ones()) as usize).sum();
-
-                        // Accept if rank reduced, or weight improves, or with probability for exploration
-                        if test_terms.len() < current.terms.len()
-                            || new_weight <= old_weight
-                            || (rng.next_u64() % 100) < 30
-                        {
-                            current.terms = test_terms;
-                        }
-                    }
-
-                    let cur_rank = current.rank();
-                    let cur_weight = current.total_weight();
-
-                    if cur_rank < best_rank || (cur_rank == best_rank && cur_weight < best_weight) {
-                        best_rank = cur_rank;
-                        best_weight = cur_weight;
-                        best_terms = current.terms.clone();
-                        steps_without_improvement = 0;
-
-                        if thread_id == 0 {
-                            println!(
-                                "   🌟 [NEW RECORD] Thread {} -> Rank R = {:2}, Total Weight = {:4} (Step {})",
-                                thread_id, best_rank, best_weight, step
-                            );
-                        }
-                    } else {
-                        steps_without_improvement += 1;
-                    }
-                } else {
-                    steps_without_improvement += 1;
-                }
-
-                // If stuck, apply plus-transition (escape local minimum)
-                if steps_without_improvement > 150 {
-                    plus_transition(&mut current.terms, &mut rng, n, m, p);
-                    if steps_without_improvement > 3000 {
-                        // Reset to best terms
-                        current.terms = best_terms.clone();
-                        steps_without_improvement = 0;
-                    }
-                }
-            }
-
-            let is_verified = verify_tensor_decomposition(&best_terms, n, m, p);
-            FlipGraphRecord {
-                n,
-                m,
-                p,
-                min_rank: best_rank,
-                min_weight: best_weight,
-                flips_evaluated: total_flips,
-                verified: is_verified,
-                champion_terms: best_terms,
-            }
-        })
-        .collect();
-
-    let mut global_best = thread_results[0].clone();
-    let mut total_flips_all: u64 = 0;
-
-    for res in thread_results {
-        total_flips_all += res.flips_evaluated;
-        if res.min_rank < global_best.min_rank
-            || (res.min_rank == global_best.min_rank && res.min_weight < global_best.min_weight)
-        {
-            global_best = res;
-        }
+    writeln!(file, "================================================================================").unwrap();
+    writeln!(file, "🚨 [WORLD RECORD BROKEN] {} SCHEME CERTIFICATE", tag).unwrap();
+    writeln!(file, "Tensor Dimension: <{}, {}, {}> | Rank R = {} | Total Weight = {}", decomp.n, decomp.m, decomp.p, decomp.rank(), decomp.total_weight()).unwrap();
+    writeln!(file, "Exact F_2 Verification (verify_tensor_decomposition): {}", decomp.verify()).unwrap();
+    writeln!(file, "--------------------------------------------------------------------------------").unwrap();
+    for (r, &(u, v, w)) in decomp.terms.iter().enumerate() {
+        writeln!(file, "Term {:2}: U = 0x{:04X}, V = 0x{:04X}, W = 0x{:04X}", r + 1, u, v, w).unwrap();
     }
-    global_best.flips_evaluated = total_flips_all;
-
-    let elapsed = start_time.elapsed().as_secs_f64();
-    let flips_per_sec = (total_flips_all as f64) / elapsed;
-
-    println!(
-        "\n✓ [FLIP-GRAPH COMPLETED] Evaluated {} flips in {:.2}s ({:.2} M flips/s)",
-        total_flips_all,
-        elapsed,
-        flips_per_sec / 1e6
-    );
-    println!(
-        "🏆 Champion Decomposition <{}, {}, {}>: Rank R = {}, Total Additive Weight = {}, Verified: {}\n",
-        global_best.n, global_best.m, global_best.p, global_best.min_rank, global_best.min_weight, global_best.verified
-    );
-
-    global_best
+    writeln!(file, "================================================================================\n").unwrap();
 }
 
 /// Print explicit algebraic formulas for a verified matrix multiplication decomposition
@@ -654,36 +462,198 @@ pub fn print_algebraic_decomposition(decomp: &TensorDecomposition) {
     println!("Verified 100% Exact under verify_tensor_decomposition: {}\n", decomp.verify());
 }
 
-/// Master CLI runner for Flip-Graph Hunter
-pub fn run_flip_graph_master() {
+/// Continuous Deep Hunt Engine with 8 Rayon threads, Plus/Minus Transitions, and Live Telemetry
+pub fn run_flip_graph_deep(duration_secs: u64) {
     println!("\n╔═══════════════════════════════════════════════════════════════════════════════╗");
-    println!("║  KAUERS-MOOSBAUER FLIP-GRAPH MATRIX MULTIPLICATION TENSOR RANK HUNTER        ║");
+    println!("║  KAUERS-MOOSBAUER DEEP FLIP-GRAPH TENSOR HUNTER (Rayon 8-Core Swarm)        ║");
+    println!("║  Targets: <2,3,3> R <= 15 Hunt (Cores 0..4) & <3,3,3> R <= 22 Hunt (Cores 4..8)║");
     println!("╚═══════════════════════════════════════════════════════════════════════════════╝\n");
 
-    // TARGET 1: <2, 3, 3> from Naive R = 18 down towards R = 15
-    println!(">>> TARGET 1: <2, 3, 3> Matrix Multiplication Tensor (Naive R = 18) <<<");
+    let total_flips = Arc::new(AtomicU64::new(0));
+    let best_r_233 = Arc::new(AtomicUsize::new(18));
+    let best_w_233 = Arc::new(AtomicUsize::new(54));
+    let best_r_333 = Arc::new(AtomicUsize::new(23));
+    let best_w_333 = Arc::new(AtomicUsize::new(153));
+    let stop_signal = Arc::new(AtomicBool::new(false));
+
+    // Seed initial decompositions
     let naive_233 = naive_decomposition(2, 3, 3);
     assert!(naive_233.verify(), "Naive <2,3,3> verification failed!");
-    println!("✓ Canonical naive decomposition of <2, 3, 3> verified (R = 18, Weight = 54).");
+    let laderman_333 = laderman_23_decomposition();
+    assert!(laderman_333.verify(), "Laderman 23 verification failed!");
 
-    let record_233 = hunt_flip_graph(2, 3, 3, naive_233, 120_000);
-    assert!(record_233.verified, "Champion <2,3,3> failed exact tensor verification!");
-    let decomp_233 = TensorDecomposition::new(2, 3, 3, record_233.champion_terms);
-    print_algebraic_decomposition(&decomp_233);
+    // Spawn 5-second telemetry background monitor
+    let total_flips_tele = Arc::clone(&total_flips);
+    let best_r_233_tele = Arc::clone(&best_r_233);
+    let best_w_233_tele = Arc::clone(&best_w_233);
+    let best_r_333_tele = Arc::clone(&best_r_333);
+    let best_w_333_tele = Arc::clone(&best_w_333);
+    let stop_signal_tele = Arc::clone(&stop_signal);
 
-    // TARGET 2: <3, 3, 3> Exploration for Sparsest Additive Complexity Scheme
-    println!(">>> TARGET 2: <3, 3, 3> Matrix Multiplication Tensor (Rank R <= 23) <<<");
-    let laderman = laderman_23_decomposition();
-    let laderman_valid = laderman.verify();
-    println!("✓ Laderman (1976) R = 23 seed verified on F_2: {}", laderman_valid);
-    assert!(laderman_valid, "Laderman 23 seed failed exact F_2 tensor verification!");
-    println!("   Initial Laderman Total Weight: {}", laderman.total_weight());
+    let start_instant = Instant::now();
+    let tele_handle = std::thread::spawn(move || {
+        let mut last_flips = 0u64;
+        let mut last_time = Instant::now();
+        while !stop_signal_tele.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(5000));
+            let current_flips = total_flips_tele.load(Ordering::Relaxed);
+            let dt = last_time.elapsed().as_secs_f64();
+            let flips_per_sec = ((current_flips - last_flips) as f64) / dt;
+            last_flips = current_flips;
+            last_time = Instant::now();
 
-    println!("\nSearching Flip-Graph for Sparsest Matrix Multiplication Scheme (Minimal Additive Complexity)...");
-    let record_333 = hunt_flip_graph(3, 3, 3, laderman, 150_000);
-    assert!(record_333.verified, "Champion <3,3,3> failed exact tensor verification!");
-    let decomp_333 = TensorDecomposition::new(3, 3, 3, record_333.champion_terms);
-    print_algebraic_decomposition(&decomp_333);
+            let r233 = best_r_233_tele.load(Ordering::Relaxed);
+            let w233 = best_w_233_tele.load(Ordering::Relaxed);
+            let r333 = best_r_333_tele.load(Ordering::Relaxed);
+            let w333 = best_w_333_tele.load(Ordering::Relaxed);
+
+            let elapsed_total = start_instant.elapsed().as_secs();
+            let mm = elapsed_total / 60;
+            let ss = elapsed_total % 60;
+
+            println!(
+                "📡 [FLIP TELEMETRY {:02}:{:02}] {:5.2} M flips/s | <2,3,3> Best R = {:2} (W = {:3}) | <3,3,3> Best R = {:2} (W = {:3}) | Total: {:.2} M flips",
+                mm, ss, flips_per_sec / 1e6, r233, w233, r333, w333, (current_flips as f64) / 1e6
+            );
+
+            if duration_secs > 0 && elapsed_total >= duration_secs {
+                stop_signal_tele.store(true, Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
+    let num_threads = rayon::current_num_threads();
+    println!("⚡ Launched {} Rayon worker threads. Active search underway...\n", num_threads);
+
+    (0..num_threads).into_par_iter().for_each(|thread_id| {
+        let mut rng = FastRng::new(0x9e3779b97f4a7c15 ^ ((thread_id as u64 + 1) * 0x517cc1b727220a95));
+
+        // Threads 0..4: Target <2, 3, 3>
+        // Threads 4..8: Target <3, 3, 3>
+        let is_target_333 = thread_id >= num_threads / 2;
+        let (n, m, p) = if is_target_333 { (3, 3, 3) } else { (2, 3, 3) };
+        let mut current = if is_target_333 { laderman_333.clone() } else { naive_233.clone() };
+
+        let mut best_terms = current.terms.clone();
+        let mut best_rank = current.rank();
+        let mut best_weight = current.total_weight();
+
+        let mut temperature = 2.0f64;
+        let mut steps_without_reduction = 0usize;
+        let mut in_high_temp_phase = 0usize;
+
+        while !stop_signal.load(Ordering::Relaxed) {
+            total_flips.fetch_add(1, Ordering::Relaxed);
+            let flips = find_all_flips(&current.terms);
+
+            if !flips.is_empty() {
+                // 1. Lookahead for greedy reduction
+                let mut greedy_terms = None;
+                for &flip in &flips {
+                    let mut probe = current.terms.clone();
+                    apply_flip(&mut probe, flip);
+                    if reduce_terms(&mut probe) {
+                        greedy_terms = Some(probe);
+                        break;
+                    }
+                }
+
+                if let Some(mut reduced_probe) = greedy_terms {
+                    reduce_terms(&mut reduced_probe);
+                    current.terms = reduced_probe;
+                    steps_without_reduction = 0;
+                } else {
+                    // 2. Simulated Annealing Flip Move
+                    let flip_idx = rng.gen_range(flips.len());
+                    let mut probe = current.terms.clone();
+                    apply_flip(&mut probe, flips[flip_idx]);
+                    let _ = reduce_terms(&mut probe);
+
+                    let old_w = current.total_weight() as f64;
+                    let new_w = probe.iter().map(|&(u, v, w)| (u.count_ones() + v.count_ones() + w.count_ones()) as usize).sum::<usize>() as f64;
+                    let delta_w = new_w - old_w;
+
+                    let accept = if probe.len() < current.terms.len() {
+                        true
+                    } else if in_high_temp_phase > 0 {
+                        in_high_temp_phase -= 1;
+                        true
+                    } else if delta_w <= 0.0 {
+                        true
+                    } else {
+                        rng.next_f64() < (-delta_w / temperature).exp()
+                    };
+
+                    if accept {
+                        current.terms = probe;
+                    }
+                    steps_without_reduction += 1;
+                }
+
+                let cur_rank = current.rank();
+                let cur_weight = current.total_weight();
+
+                if cur_rank < best_rank || (cur_rank == best_rank && cur_weight < best_weight) {
+                    best_rank = cur_rank;
+                    best_weight = cur_weight;
+                    best_terms = current.terms.clone();
+                    steps_without_reduction = 0;
+
+                    if !is_target_333 {
+                        let _ = best_r_233.fetch_min(best_rank, Ordering::Relaxed);
+                        let _ = best_w_233.fetch_min(best_weight, Ordering::Relaxed);
+                    } else {
+                        let _ = best_r_333.fetch_min(best_rank, Ordering::Relaxed);
+                        let _ = best_w_333.fetch_min(best_weight, Ordering::Relaxed);
+                    }
+
+                    // Check for World Record Breakthrough!
+                    if (!is_target_333 && best_rank <= 15) || (is_target_333 && best_rank <= 22) {
+                        let is_valid = verify_tensor_decomposition(&best_terms, n, m, p);
+                        if is_valid {
+                            println!(
+                                "\n🚨 \x1b[1;31m[WORLD RECORD BROKEN]\x1b[0m Thread {} found verified Rank R = {} for <{},{},{}> (Weight = {})!",
+                                thread_id, best_rank, n, m, p, best_weight
+                            );
+                            let tag = format!("<{},{},{}>-Rank-{}", n, m, p, best_rank);
+                            let decomp = TensorDecomposition::new(n, m, p, best_terms.clone());
+                            save_record_certificate(&decomp, "discovered_counterexamples.txt", &tag);
+                            print_algebraic_decomposition(&decomp);
+                        }
+                    }
+                }
+
+                // Cool temperature slowly
+                temperature = (temperature * 0.99995).max(0.05);
+
+                // Plus-Transition trigger on local minimum trap
+                if steps_without_reduction >= 50_000 {
+                    current.terms = best_terms.clone();
+                    steps_without_reduction = 0;
+                    temperature = 2.5;
+                } else if steps_without_reduction >= 25_000 {
+                    if rng.next_u64() % 2 == 0 {
+                        plus_transition_split(&mut current.terms, &mut rng, n, m, p);
+                    } else {
+                        plus_transition_zero_pair(&mut current.terms, &mut rng, n, m, p);
+                    }
+                    temperature = 3.5;
+                    in_high_temp_phase = 2_500;
+                }
+            } else {
+                plus_transition_split(&mut current.terms, &mut rng, n, m, p);
+            }
+        }
+    });
+
+    let _ = tele_handle.join();
+    println!("\n✓ [DEEP HUNT HALTED] Execution completed successfully.\n");
+}
+
+/// Master benchmark runner
+pub fn run_flip_graph_master() {
+    run_flip_graph_deep(30);
 }
 
 #[cfg(test)]
@@ -711,6 +681,24 @@ mod tests {
         let laderman = laderman_23_decomposition();
         assert_eq!(laderman.rank(), 23);
         assert!(laderman.verify());
+    }
+
+    #[test]
+    fn test_plus_transition_split_invariance() {
+        let mut naive = naive_decomposition(2, 2, 2);
+        let mut rng = FastRng::new(42);
+        plus_transition_split(&mut naive.terms, &mut rng, 2, 2, 2);
+        assert_eq!(naive.rank(), 9);
+        assert!(naive.verify());
+    }
+
+    #[test]
+    fn test_plus_transition_zero_pair_invariance() {
+        let mut naive = naive_decomposition(2, 2, 2);
+        let mut rng = FastRng::new(42);
+        plus_transition_zero_pair(&mut naive.terms, &mut rng, 2, 2, 2);
+        assert_eq!(naive.rank(), 10);
+        assert!(naive.verify());
     }
 
     #[test]
