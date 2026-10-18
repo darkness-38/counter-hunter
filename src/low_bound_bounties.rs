@@ -92,223 +92,505 @@ pub struct DivisibilityChampion {
     pub m: u64,
     pub p_m: u32,
     pub n: u64,
-    pub p_n: u32,
+    pub p_n: u64,
+    pub k: u32,
     pub ratio_m: f64,
     pub ratio_bound: f64,
 }
 
-/// Hunt for counterexamples to Sun's $500 Prize Conjecture on OEIS A247824 up to m = max_m.
+#[inline(always)]
+fn fast_bitset_hash(val: i64) -> usize {
+    ((val as u64).wrapping_mul(0x517cc1b727220a95) >> 41) as usize & (131072 * 64 - 1)
+}
+
+/// Hunt for counterexamples to Sun's $500 Prize Conjecture on OEIS A247824 up to m = max_m
+/// using the 2-Phase Algebraic Inversion Sniper:
+/// Phase 1: Small-n fast elimination (n <= 2000) + Inversion Streaming for k in 2..=19 (n <= 50M).
+/// Phase 2: Segmented Prime Sieve for hard survivors (k in 20..=24) up to n = 500,000,000.
 pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
     let effective_start = start_m.max(3);
     let effective_end = max_m.max(effective_start);
 
     println!("\x1b[1;36m================================================================================\x1b[0m");
-    println!("\x1b[1;32m🎯 HEDEF A: OEIS A247824 — SUN'S $500 PRIZE PRIME DIVISIBILITY CONJECTURE\x1b[0m");
+    println!("\x1b[1;32m🎯 HEDEF A: OEIS A247824 — 2-PHASE ALGEBRAIC INVERSION SNIPER ($500 BOUNTY)\x1b[0m");
+    println!("   Algebraic Identity: p_m + p_n = k(m + n) <=> p_n - k*n = k*m - p_m");
     println!("   Conjecture: For each m > 2, exists 1 <= n < m(m-1) such that (m + n) | (p_m + p_n)");
     println!("\x1b[1;36m================================================================================\x1b[0m");
-    println!("🔍 Search Range      : m = {} .. {}", effective_start, effective_end);
-    println!("⚡ Target Prime Pool : 50,000,000 primes (Vec<u32>, ~200 MB RAM)");
-    println!("🧵 Multi-threading   : Rayon 8-Core Work Stealing");
+    println!("🔍 Search Range          : m = {} .. {}", effective_start, effective_end);
+    println!("⚡ Phase 1 Prime Pool    : 50,000,000 primes (Vec<u32>, ~200 MB RAM, k in 2..=19)");
+    println!("🚀 Phase 2 Deep Sieve    : Segmented Sieve up to n = 500,000,000 (k in 20..=24)");
+    println!("🧵 Multi-threading       : Rayon Lock-Free Parallel Multiplier Dispatch");
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 
+    let total_timer = Instant::now();
+
+    // 1. Generate first 50 million primes for Phase 1
     let sieve_start = Instant::now();
-    // Guarantee 50 million primes for large ranges
     let primes = if prime_limit >= 982_451_653 || effective_end > 100_000 {
         sieve_n_primes(50_000_000)
     } else {
-        sieve_primes(prime_limit)
+        sieve_primes(prime_limit.max(2_000_000))
     };
-    println!("✓ Sieved {} primes in {:.2?}. Prime p_50000000 = {}\n", primes.len(), sieve_start.elapsed(), primes.last().unwrap_or(&0));
-
     let num_primes = primes.len() as u64;
+    println!(
+        "✓ Sieved {} primes in {:.2?}. Prime p_{} = {}\n",
+        primes.len(),
+        sieve_start.elapsed(),
+        primes.len(),
+        primes.last().unwrap_or(&0)
+    );
+
     let counterexamples_found = AtomicUsize::new(0);
-    let total_m_tested = AtomicU64::new(0);
+    let mut ans_n = vec![0u64; (effective_end + 1) as usize];
+    let mut ans_k = vec![0u32; (effective_end + 1) as usize];
 
-    let start_time = Instant::now();
-    let mut last_telemetry = Instant::now();
+    // ========================================================================
+    // FAZ 1a: FAST PATH FOR SMALL n <= 2000
+    // ========================================================================
+    let p1a_start = Instant::now();
+    let fast_results: Vec<(u64, u64, u32)> = (effective_start..=effective_end)
+        .into_par_iter()
+        .filter_map(|m| {
+            if m > num_primes {
+                return None;
+            }
+            let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as u64;
+            let limit = m.saturating_mul(m - 1);
+            let max_n = 2000u64.min(limit).min(num_primes);
 
-    let chunk_size = 5_000u64;
-    let mut current_m = effective_start;
-
-    let mut record_highs: Vec<DivisibilityChampion> = Vec::new();
-    let mut record_ratios_m: Vec<DivisibilityChampion> = Vec::new();
-    let mut record_ratios_b: Vec<DivisibilityChampion> = Vec::new();
-    let mut uncharted_champions: Vec<DivisibilityChampion> = Vec::new();
-
-    let mut max_seen_n = 0u64;
-    let mut max_ratio_m = 0.0f64;
-    let mut max_ratio_bound = 0.0f64;
-
-    while current_m <= effective_end {
-        let chunk_end = (current_m + chunk_size).min(effective_end + 1);
-        let m_range: Vec<u64> = (current_m..chunk_end).collect();
-
-        let chunk_results: Vec<(u64, Option<u64>)> = m_range
-            .into_par_iter()
-            .map(|m| {
-                if m > num_primes {
-                    return (m, None);
+            for n in 1..=max_n {
+                let p_n = unsafe { *primes.get_unchecked((n - 1) as usize) } as u64;
+                if (p_m + p_n) % (m + n) == 0 {
+                    let k = ((p_m + p_n) / (m + n)) as u32;
+                    return Some((m, n, k));
                 }
-                let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as u64;
-                let limit = m.saturating_mul(m - 1);
-                let max_n_check = limit.min(num_primes);
+            }
+            None
+        })
+        .collect();
 
-                let mut found_n = None;
-                // Fast path for n = 1 (p_1 = 2)
-                if (p_m + 2) % (m + 1) == 0 {
-                    found_n = Some(1);
-                } else {
-                    for n in 2..max_n_check {
-                        let p_n = unsafe { *primes.get_unchecked((n - 1) as usize) } as u64;
-                        let sum_p = p_m + p_n;
-                        let sum_idx = m + n;
-                        if sum_p % sum_idx == 0 {
-                            found_n = Some(n);
-                            break;
+    let fast_resolved_count = fast_results.len();
+    for (m, n, k) in fast_results {
+        ans_n[m as usize] = n;
+        ans_k[m as usize] = k;
+    }
+
+    let total_m = (effective_end - effective_start + 1) as usize;
+    println!(
+        "⚡ [PHASE 1a FAST PATH] Resolved {} / {} candidates ({:.1}%) with n <= 2000 in {:.2?}",
+        fast_resolved_count,
+        total_m,
+        (fast_resolved_count as f64) / (total_m as f64) * 100.0,
+        p1a_start.elapsed()
+    );
+
+    // ========================================================================
+    // FAZ 1b: ALGEBRAIC INVERSION SNIPER FOR k in 2..=19 (2000 < n <= 50M)
+    // ========================================================================
+    let unresolved_m: Vec<u64> = (effective_start..=effective_end)
+        .filter(|&m| ans_n[m as usize] == 0)
+        .collect();
+
+    if !unresolved_m.is_empty() {
+        let p1b_start = Instant::now();
+        println!(
+            "⚡ [PHASE 1b ALGEBRAIC INVERSION] Inverting {} candidates for k in 2..=19 across 50M primes...",
+            unresolved_m.len()
+        );
+
+        let k_matches: Vec<Vec<(u64, u64, u32)>> = (2..=19u32)
+            .into_par_iter()
+            .map(|k| {
+                use std::collections::HashMap;
+                let mut target_map: HashMap<i64, Vec<u32>> = HashMap::new();
+                let mut bitset = vec![0u64; 131072];
+                let k_i64 = k as i64;
+
+                for &m in &unresolved_m {
+                    let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as i64;
+                    let target = k_i64 * (m as i64) - p_m;
+                    let h = fast_bitset_hash(target);
+                    bitset[h / 64] |= 1u64 << (h % 64);
+                    target_map.entry(target).or_default().push(m as u32);
+                }
+
+                let mut matches = Vec::new();
+                for (idx, &p_n) in primes.iter().enumerate().skip(2000) {
+                    let n = (idx + 1) as u64;
+                    let d = (p_n as i64) - k_i64 * (n as i64);
+                    let h = fast_bitset_hash(d);
+                    if (bitset[h / 64] & (1u64 << (h % 64))) != 0 {
+                        if let Some(ms) = target_map.remove(&d) {
+                            for m in ms {
+                                matches.push((m as u64, n, k));
+                            }
+                            if target_map.is_empty() {
+                                break;
+                            }
                         }
                     }
                 }
-                (m, found_n)
+                matches
             })
             .collect();
 
-        for (m, res) in chunk_results {
-            total_m_tested.fetch_add(1, Ordering::Relaxed);
-            let p_m = primes[(m - 1) as usize];
-            match res {
-                Some(n) => {
-                    let limit = m.saturating_mul(m - 1);
-                    let p_n = primes[(n - 1) as usize];
-                    let r_m = (n as f64) / (m as f64);
-                    let r_b = (n as f64) / (limit as f64);
-
-                    if n >= limit {
-                        counterexamples_found.fetch_add(1, Ordering::SeqCst);
-                        println!(
-                            "\x1b[1;31m🚨🚨 $500 BOUNTY WON: COUNTEREXAMPLE AT m = {}! n = {} >= m(m-1) = {}! 🚨🚨\x1b[0m",
-                            m, n, limit
-                        );
-                        let _ = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open("discovered_counterexamples.txt")
-                            .map(|mut f| {
-                                use std::io::Write;
-                                writeln!(f, "HEDEF A COUNTEREXAMPLE: m = {}, p_m = {}, n = {}, p_n = {}, limit = {}", m, p_m, n, p_n, limit)
-                            });
+        let mut p1b_resolved = 0;
+        for batch in k_matches {
+            for (m, n, k) in batch {
+                let m_idx = m as usize;
+                if ans_n[m_idx] == 0 || n < ans_n[m_idx] {
+                    if ans_n[m_idx] == 0 {
+                        p1b_resolved += 1;
                     }
-
-                    let mut is_record = false;
-                    if n > max_seen_n {
-                        max_seen_n = n;
-                        record_highs.push(DivisibilityChampion {
-                            m,
-                            p_m,
-                            n,
-                            p_n,
-                            ratio_m: r_m,
-                            ratio_bound: r_b,
-                        });
-                        is_record = true;
-                    }
-
-                    if r_m > max_ratio_m {
-                        max_ratio_m = r_m;
-                        record_ratios_m.push(DivisibilityChampion {
-                            m,
-                            p_m,
-                            n,
-                            p_n,
-                            ratio_m: r_m,
-                            ratio_bound: r_b,
-                        });
-                        is_record = true;
-                    }
-
-                    if r_b > max_ratio_bound {
-                        max_ratio_bound = r_b;
-                        record_ratios_b.push(DivisibilityChampion {
-                            m,
-                            p_m,
-                            n,
-                            p_n,
-                            ratio_m: r_m,
-                            ratio_bound: r_b,
-                        });
-                        is_record = true;
-                    }
-
-                    if m > 400_000 && is_record {
-                        uncharted_champions.push(DivisibilityChampion {
-                            m,
-                            p_m,
-                            n,
-                            p_n,
-                            ratio_m: r_m,
-                            ratio_bound: r_b,
-                        });
-                        println!(
-                            "🌟 \x1b[1;32m[UNCHARTED RECORD]\x1b[0m m = {:7} (p_m = {:9}) -> n = {:9} (p_n = {:10}), n/m = {:6.2}, n/m(m-1) = {:.6}",
-                            m, p_m, n, p_n, r_m, r_b
-                        );
-                    }
-                }
-                None => {
-                    let limit = m.saturating_mul(m - 1);
-                    if limit <= num_primes {
-                        // Truly exhausted entire domain m(m-1)!
-                        counterexamples_found.fetch_add(1, Ordering::SeqCst);
-                        println!(
-                            "\x1b[1;31m🚨🚨 $500 BOUNTY WON: NO n < m(m-1) EXISTS FOR m = {}! 🚨🚨\x1b[0m",
-                            m
-                        );
-                    } else {
-                        println!(
-                            "\x1b[1;33m⚠️ [EXTREME PEAK CANDIDATE] m = {} (p_m = {}): n > 50,000,000 (limit = {})!\x1b[0m",
-                            m, p_m, limit
-                        );
-                    }
+                    ans_n[m_idx] = n;
+                    ans_k[m_idx] = k;
                 }
             }
         }
 
-        let tested = total_m_tested.load(Ordering::Relaxed);
-        let total_to_test = effective_end - effective_start + 1;
-        if last_telemetry.elapsed().as_secs() >= 5 || chunk_end > effective_end {
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let progress = (tested as f64) / (total_to_test as f64) * 100.0;
-            let rate = (tested as f64) / elapsed / 1000.0;
-            println!(
-                "📡 [TELEMETRY] [{:5.1}%] m = {:8} | {:6.1} km/s | Max n: {:9} | Max n/m: {:7.2} | Max n/m(m-1): {:8.4} | Tested: {}",
-                progress, chunk_end - 1, rate, max_seen_n, max_ratio_m, max_ratio_bound, tested
-            );
-            last_telemetry = Instant::now();
-        }
-
-        current_m = chunk_end;
+        println!(
+            "✓ [PHASE 1b COMPLETED] Resolved {} candidates across k in 2..=19 in {:.2?}\n",
+            p1b_resolved,
+            p1b_start.elapsed()
+        );
     }
 
-    let elapsed = start_time.elapsed().as_secs_f64();
-    let tested = total_m_tested.load(Ordering::Relaxed);
+    // Check for any Phase 1 counterexamples (n >= m(m-1))
+    for m in effective_start..=effective_end {
+        let n = ans_n[m as usize];
+        if n > 0 {
+            let limit = m.saturating_mul(m - 1);
+            if n >= limit {
+                counterexamples_found.fetch_add(1, Ordering::SeqCst);
+                println!(
+                    "\x1b[1;31m🚨🚨 $500 BOUNTY WON: COUNTEREXAMPLE AT m = {}! n = {} >= m(m-1) = {}! 🚨🚨\x1b[0m",
+                    m, n, limit
+                );
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("discovered_counterexamples.txt")
+                    .map(|mut f| {
+                        use std::io::Write;
+                        let p_m = primes[(m - 1) as usize];
+                        let p_n = (ans_k[m as usize] as u64) * (m + n) - (p_m as u64);
+                        writeln!(f, "HEDEF A COUNTEREXAMPLE: m = {}, p_m = {}, n = {}, p_n = {}, limit = {}", m, p_m, n, p_n, limit)
+                    });
+            }
+        }
+    }
+
+    // ========================================================================
+    // FAZ 2: DEEP HUNT FOR HARD SURVIVORS (k in 20..=24) VIA SEGMENTED SIEVE
+    // ========================================================================
+    let hard_survivors: Vec<u64> = (effective_start..=effective_end)
+        .filter(|&m| ans_n[m as usize] == 0)
+        .collect();
+
+    let mut hard_survivor_records: Vec<DivisibilityChampion> = Vec::new();
+
+    if !hard_survivors.is_empty() {
+        println!("\x1b[1;33m================================================================================\x1b[0m");
+        println!("\x1b[1;33m⚡ FAZ 2: ÖLÜMCÜL ADAYLAR İÇİN 500 MİLYON ASAL DERİN AVI (k in 20..=24)\x1b[0m");
+        println!("   Hard Survivors with n > 50,000,000 Count: {}", hard_survivors.len());
+        if hard_survivors.len() <= 15 {
+            println!("   Surviving m list: {:?}", hard_survivors);
+        } else {
+            println!("   First 15 surviving m: {:?} ...", &hard_survivors[..15]);
+        }
+        println!("   Streaming Segmented Sieve from n = 50,000,001 to n = 500,000,000 (p_n up to ~11.1B)...");
+        println!("\x1b[1;33m================================================================================\x1b[0m\n");
+
+        let p2_start = Instant::now();
+        use std::collections::HashMap;
+
+        // Build target tables and bitset filters for k in 20..=24
+        let mut targets_k: Vec<HashMap<i64, Vec<u32>>> = vec![HashMap::new(); 5];
+        let mut bitset_k: Vec<Vec<u64>> = vec![vec![0u64; 131072]; 5];
+
+        for &m in &hard_survivors {
+            let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as i64;
+            for k in 20..=24u32 {
+                let k_idx = (k - 20) as usize;
+                let k_i64 = k as i64;
+                let target = k_i64 * (m as i64) - p_m;
+                let h = fast_bitset_hash(target);
+                bitset_k[k_idx][h / 64] |= 1u64 << (h % 64);
+                targets_k[k_idx].entry(target).or_default().push(m as u32);
+            }
+        }
+
+        // Segmented Sieve parameters
+        let base_primes = sieve_primes(110_000);
+        let mut low = 982_451_655u64; // immediately after p_50000000 = 982,451,653
+        let seg_num_odds = 1_000_000usize;
+        let seg_step = 2 * seg_num_odds as u64;
+        let num_words = (seg_num_odds + 63) / 64;
+        let mut seg_bitset = vec![0u64; num_words];
+
+        let mut curr_n = 50_000_000u64;
+        let max_target_n = 500_000_000u64;
+        let mut active_hard_count = hard_survivors.len();
+        let mut p2_last_telemetry = Instant::now();
+
+        while curr_n < max_target_n && active_hard_count > 0 {
+            let high = low + seg_step;
+            seg_bitset.fill(0);
+
+            for &p in &base_primes {
+                if p == 2 {
+                    continue;
+                }
+                let p_u64 = p as u64;
+                let p_sq = p_u64 * p_u64;
+                if p_sq >= high {
+                    break;
+                }
+                let mut start = if p_sq > low {
+                    p_sq
+                } else {
+                    let rem = low % p_u64;
+                    if rem == 0 {
+                        low
+                    } else {
+                        low + (p_u64 - rem)
+                    }
+                };
+                if start % 2 == 0 {
+                    start += p_u64;
+                }
+                if start < high {
+                    let mut bit_idx = ((start - low) / 2) as usize;
+                    let step = p as usize;
+                    while bit_idx < seg_num_odds {
+                        seg_bitset[bit_idx / 64] |= 1u64 << (bit_idx % 64);
+                        bit_idx += step;
+                    }
+                }
+            }
+
+            // Stream primes from segment
+            for word_idx in 0..num_words {
+                let word = seg_bitset[word_idx];
+                if word == !0u64 {
+                    continue;
+                }
+                for bit in 0..64 {
+                    let bit_idx = word_idx * 64 + bit;
+                    if bit_idx >= seg_num_odds {
+                        break;
+                    }
+                    if (word & (1u64 << bit)) == 0 {
+                        let p_n = low + 2 * (bit_idx as u64);
+                        curr_n += 1;
+
+                        // Match against hard survivor targets for k in 20..=24
+                        for k in 20..=24u32 {
+                            let k_idx = (k - 20) as usize;
+                            let k_i64 = k as i64;
+                            let d = (p_n as i64) - k_i64 * (curr_n as i64);
+                            let h = fast_bitset_hash(d);
+
+                            if (bitset_k[k_idx][h / 64] & (1u64 << (h % 64))) != 0 {
+                                if let Some(ms) = targets_k[k_idx].remove(&d) {
+                                    for m in ms {
+                                        let m_u64 = m as u64;
+                                        let m_idx = m as usize;
+                                        if ans_n[m_idx] == 0 {
+                                            ans_n[m_idx] = curr_n;
+                                            ans_k[m_idx] = k;
+                                            active_hard_count = active_hard_count.saturating_sub(1);
+
+                                            let p_m = primes[m_idx - 1];
+                                            let limit = m_u64.saturating_mul(m_u64 - 1);
+                                            let r_m = (curr_n as f64) / (m_u64 as f64);
+                                            let r_b = (curr_n as f64) / (limit as f64);
+
+                                            hard_survivor_records.push(DivisibilityChampion {
+                                                m: m_u64,
+                                                p_m,
+                                                n: curr_n,
+                                                p_n,
+                                                k,
+                                                ratio_m: r_m,
+                                                ratio_bound: r_b,
+                                            });
+
+                                            println!(
+                                                "🌟 \x1b[1;32m[HARD SURVIVOR RESOLVED]\x1b[0m m = {:7} (p_m = {:9}) -> n = {:10} (p_n = {:11}), k = {}, n/m = {:8.2}, n/m(m-1) = {:.8}",
+                                                m, p_m, curr_n, p_n, k, r_m, r_b
+                                            );
+
+                                            if curr_n >= limit {
+                                                counterexamples_found.fetch_add(1, Ordering::SeqCst);
+                                                println!(
+                                                    "\x1b[1;31m🚨🚨 $500 BOUNTY WON: COUNTEREXAMPLE AT m = {}! n = {} >= m(m-1) = {}! 🚨🚨\x1b[0m",
+                                                    m, curr_n, limit
+                                                );
+                                                let _ = std::fs::OpenOptions::new()
+                                                    .create(true)
+                                                    .append(true)
+                                                    .open("discovered_counterexamples.txt")
+                                                    .map(|mut f| {
+                                                        use std::io::Write;
+                                                        writeln!(f, "HEDEF A COUNTEREXAMPLE: m = {}, p_m = {}, n = {}, p_n = {}, limit = {}", m, p_m, curr_n, p_n, limit)
+                                                    });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if curr_n >= max_target_n || active_hard_count == 0 {
+                            break;
+                        }
+                    }
+                }
+                if curr_n >= max_target_n || active_hard_count == 0 {
+                    break;
+                }
+            }
+
+            if p2_last_telemetry.elapsed().as_secs() >= 5 {
+                let elapsed_p2 = p2_start.elapsed().as_secs_f64();
+                let primes_per_sec = ((curr_n - 50_000_000) as f64) / elapsed_p2;
+                println!(
+                    "📡 [FAZ 2 TELEMETRY] n = {:10} (p_n = {:11}) | {:6.1} k primes/s | Active Survivors Left: {}",
+                    curr_n, low, primes_per_sec / 1000.0, active_hard_count
+                );
+                p2_last_telemetry = Instant::now();
+            }
+
+            low = high;
+        }
+
+        println!(
+            "\n✓ [FAZ 2 COMPLETED] Reached n = {} in {:.2?}. Resolved {} hard survivors.\n",
+            curr_n,
+            p2_start.elapsed(),
+            hard_survivors.len() - active_hard_count
+        );
+
+        for &m in &hard_survivors {
+            if ans_n[m as usize] == 0 {
+                let p_m = primes[(m - 1) as usize];
+                let limit = m.saturating_mul(m - 1);
+                println!(
+                    "\x1b[1;33m⚠️ [EXTREME HIGH RECORD CANDIDATE] m = {} (p_m = {}): n > 500,000,000 (k >= 24, limit = {})!\x1b[0m",
+                    m, p_m, limit
+                );
+            }
+        }
+    }
+
+    // ========================================================================
+    // CHAMPION STATISTICS & COMPREHENSIVE TABLES
+    // ========================================================================
+    let total_elapsed = total_timer.elapsed().as_secs_f64();
+    let mut record_highs: Vec<DivisibilityChampion> = Vec::new();
+    let mut record_ratios_m: Vec<DivisibilityChampion> = Vec::new();
+    let mut record_ratios_b: Vec<DivisibilityChampion> = Vec::new();
+    let mut uncharted_records: Vec<DivisibilityChampion> = Vec::new();
+
+    let mut max_seen_n = 0u64;
+    let mut max_ratio_m = 0.0f64;
+    let mut max_ratio_b = 0.0f64;
+
+    for m in effective_start..=effective_end {
+        let n = ans_n[m as usize];
+        if n > 0 {
+            let p_m = primes[(m - 1) as usize];
+            let k = ans_k[m as usize];
+            let limit = m.saturating_mul(m - 1);
+            let p_n = (k as u64) * (m + n) - (p_m as u64);
+            let r_m = (n as f64) / (m as f64);
+            let r_b = (n as f64) / (limit as f64);
+
+            let champ = DivisibilityChampion {
+                m,
+                p_m,
+                n,
+                p_n,
+                k,
+                ratio_m: r_m,
+                ratio_bound: r_b,
+            };
+
+            let mut is_record = false;
+            if n > max_seen_n {
+                max_seen_n = n;
+                record_highs.push(champ.clone());
+                is_record = true;
+            }
+            if r_m > max_ratio_m {
+                max_ratio_m = r_m;
+                record_ratios_m.push(champ.clone());
+                is_record = true;
+            }
+            if r_b > max_ratio_b {
+                max_ratio_b = r_b;
+                record_ratios_b.push(champ.clone());
+                is_record = true;
+            }
+            if m > 400_000 && is_record {
+                uncharted_records.push(champ);
+            }
+        }
+    }
 
     println!("\x1b[1;36m================================================================================\x1b[0m");
     println!("🏁 HEDEF A: SCAN COMPLETED");
-    println!("   Total m Tested            : {}", tested);
-    println!("   Time Elapsed              : {:.2}s ({:.1} km/s)", elapsed, (tested as f64) / elapsed / 1000.0);
+    println!("   Total m Tested            : {}", total_m);
+    println!("   Total Elapsed Time        : {:.2}s ({:.1} km/s)", total_elapsed, (total_m as f64) / total_elapsed / 1000.0);
     println!("   Counterexamples Found     : {}", counterexamples_found.load(Ordering::SeqCst));
-    println!("\n🏆 TOP NOTABLE RECORD HIGHS OF n = a(m):");
-    println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10} | {:>16}", "m", "p_m", "n = a(m)", "p_n", "n / m", "n / (m(m-1))");
-    println!("   {:-<76}", "");
-    for c in record_highs.iter().rev().take(10) {
-        println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10.2} | {:>16.6}", c.m, c.p_m, c.n, c.p_n, c.ratio_m, c.ratio_bound);
-    }
-    if !uncharted_champions.is_empty() {
-        println!("\n🌟 NOTABLE RECORDS IN UNCHARTED TERRITORY (m > 400,000):");
-        println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10} | {:>16}", "m", "p_m", "n = a(m)", "p_n", "n / m", "n / (m(m-1))");
-        println!("   {:-<76}", "");
-        for c in uncharted_champions.iter().rev().take(10) {
-            println!("   {:>8} | {:>10} | {:>10} | {:>12} | {:>10.2} | {:>16.6}", c.m, c.p_m, c.n, c.p_n, c.ratio_m, c.ratio_bound);
+    println!("   Hard Survivors (n > 50M)  : {}", hard_survivor_records.len());
+    println!("\x1b[1;36m================================================================================\x1b[0m\n");
+
+    if !hard_survivor_records.is_empty() {
+        println!("🏆 \x1b[1;32mALL HARD SURVIVORS REQUIRING n > 50,000,000 (k >= 20):\x1b[0m");
+        println!(
+            "   {:>8} | {:>10} | {:>12} | {:>13} | {:>4} | {:>10} | {:>16}",
+            "m", "p_m", "n = a(m)", "p_n", "k", "n / m", "n / (m(m-1))"
+        );
+        println!("   {:-<84}", "");
+        for c in &hard_survivor_records {
+            println!(
+                "   {:>8} | {:>10} | {:>12} | {:>13} | {:>4} | {:>10.2} | {:>16.8}",
+                c.m, c.p_m, c.n, c.p_n, c.k, c.ratio_m, c.ratio_bound
+            );
         }
+        println!();
+    }
+
+    println!("🏆 TOP RECORD HIGHS OF n = a(m):");
+    println!(
+        "   {:>8} | {:>10} | {:>12} | {:>13} | {:>4} | {:>10} | {:>16}",
+        "m", "p_m", "n = a(m)", "p_n", "k", "n / m", "n / (m(m-1))"
+    );
+    println!("   {:-<84}", "");
+    for c in record_highs.iter().rev().take(12) {
+        println!(
+            "   {:>8} | {:>10} | {:>12} | {:>13} | {:>4} | {:>10.2} | {:>16.8}",
+            c.m, c.p_m, c.n, c.p_n, c.k, c.ratio_m, c.ratio_bound
+        );
+    }
+    println!();
+
+    if !uncharted_records.is_empty() {
+        println!("🌟 NOTABLE RECORDS IN UNCHARTED TERRITORY (m > 400,000):");
+        println!(
+            "   {:>8} | {:>10} | {:>12} | {:>13} | {:>4} | {:>10} | {:>16}",
+            "m", "p_m", "n = a(m)", "p_n", "k", "n / m", "n / (m(m-1))"
+        );
+        println!("   {:-<84}", "");
+        for c in uncharted_records.iter().rev().take(10) {
+            println!(
+                "   {:>8} | {:>10} | {:>12} | {:>13} | {:>4} | {:>10.2} | {:>16.8}",
+                c.m, c.p_m, c.n, c.p_n, c.k, c.ratio_m, c.ratio_bound
+            );
+        }
+        println!();
     }
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 }
@@ -757,5 +1039,35 @@ mod tests {
         let subset = vec![0, 1, 3, 9, 13];
         let has_cycle = find_distinct_adjacent_sum_cycle(&group, &subset);
         assert!(has_cycle);
+    }
+
+    #[test]
+    fn test_hedef_a_algebraic_identity() {
+        // Test algebraic identity: D_k(n) = p_n - k*n == k*m - p_m
+        // m = 3, n = 5, k = 2
+        // p_3 = 5, p_5 = 11. D_2(5) = 11 - 10 = 1. T_2(3) = 6 - 5 = 1.
+        let p_3 = 5i64;
+        let p_5 = 11i64;
+        assert_eq!(p_5 - 2 * 5, 2 * 3 - p_3);
+        assert_eq!((p_3 + p_5) % (3 + 5), 0);
+
+        // m = 7, n = 38, k = 4
+        // p_7 = 17, p_38 = 163. D_4(38) = 163 - 152 = 11. T_4(7) = 28 - 17 = 11.
+        let p_7 = 17i64;
+        let p_38 = 163i64;
+        assert_eq!(p_38 - 4 * 38, 4 * 7 - p_7);
+        assert_eq!((p_7 + p_38) % (7 + 38), 0);
+
+        // m = 106, n = 6866, k = 10
+        let p_106 = 577i64;
+        let p_6866 = 69143i64;
+        assert_eq!(p_6866 - 10 * 6866, 10 * 106 - p_106);
+        assert_eq!((p_106 + p_6866) % (106 + 6866), 0);
+
+        // m = 10409, n = 69804276, k = 20
+        let p_10409 = 109481i64;
+        let p_n = 1396184219i64;
+        assert_eq!(p_n - 20 * 69804276, 20 * 10409 - p_10409);
+        assert_eq!((p_10409 + p_n) % (10409 + 69804276), 0);
     }
 }

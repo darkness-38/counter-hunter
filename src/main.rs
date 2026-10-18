@@ -218,9 +218,6 @@ fn main() {
         "sun-catalog" | "permanent-catalog" | "sun-permanent" => {
             counter_hunter::sun_permanent_catalog::run_sun_permanent_catalog_master();
         }
-        "graph" | "graph-breaker" | "graph-conjecture" | "autographix" => {
-            counter_hunter::graph_conjecture_breaker::run_graph_conjecture_breaker_master();
-        }
         _ => {
             if cli.low_bound_hunt {
                 let start_m = if cli.start == 0 { 3 } else { cli.start };

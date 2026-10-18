@@ -19,8 +19,6 @@
 //!    - P_6(p) = per[(j + k)^(-1) mod p] mod p^2
 
 use rayon::prelude::*;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::time::Instant;
 
 // -----------------------------------------------------------------------------
@@ -494,16 +492,29 @@ pub fn run_sun_prime_sign_hunt() {
         let m = (p - 1) / 2;
         let p_i64 = p as i64;
 
-        // Build sin matrix in f64 / exact
-        let mat_sin: Vec<Vec<f64>> = (1..=m)
-            .map(|j| {
-                (1..=m)
-                    .map(|k| (2.0 * std::f64::consts::PI * (j as f64) * (k as f64) / (p as f64)).sin())
-                    .collect()
-            })
-            .collect();
-        let per_sin = crate::permanent::parallel_glynn_permanent_f64(&mat_sin);
-        let s_p = ((2.0f64.powi(m as i32) / (p as f64).sqrt()) * per_sin).round() as i128;
+        // For p <= 23, f64 is exact; for p >= 29, use exact 3-prime Garner CRT in [-M/2, M/2]
+        let s_p = if p <= 23 {
+            let mat_sin: Vec<Vec<f64>> = (1..=m)
+                .map(|j| {
+                    (1..=m)
+                        .map(|k| (2.0 * std::f64::consts::PI * (j as f64) * (k as f64) / (p as f64)).sin())
+                        .collect()
+                })
+                .collect();
+            let per_sin = crate::permanent::parallel_glynn_permanent_f64(&mat_sin);
+            ((2.0f64.powi(m as i32) / (p as f64).sqrt()) * per_sin).round() as i128
+        } else {
+            let (q1, g1) = find_prime_for_modulus(p, 2_000_000_000);
+            let (q2, g2) = find_prime_for_modulus(p, q1 + 1);
+            let (q3, g3) = find_prime_for_modulus(p, q2 + 1);
+            let s1 = compute_trig_permanent_fq(p, TrigKind::Sine, q1, g1);
+            let s2 = compute_trig_permanent_fq(p, TrigKind::Sine, q2, g2);
+            let s3 = compute_trig_permanent_fq(p, TrigKind::Sine, q3, g3);
+            let s_exact = garner_crt_i128(&[(s1, q1), (s2, q2), (s3, q3)]);
+            // Verify that s_p is an odd integer
+            assert_eq!(s_exact.rem_euclid(2), 1, "s_p must be odd for prime p={}", p);
+            s_exact
+        };
 
         // Build tan matrix
         let mat_tan: Vec<Vec<f64>> = (1..=m)
@@ -715,5 +726,25 @@ mod tests {
         let t_exact = garner_crt_i128(&[(t_q1, q1), (t_q2, q2), (t_q3, q3), (t_q4, q4)]);
         assert_eq!(t_exact.rem_euclid(q5 as i128), t_q5 as i128);
         assert_eq!(t_exact % 49, 0);
+    }
+
+    #[test]
+    fn test_p53_exact_sine() {
+        let p = 53u64;
+        let (q1, g1) = find_prime_for_modulus(p, 2_000_000_000);
+        let (q2, g2) = find_prime_for_modulus(p, q1 + 1);
+        let (q3, g3) = find_prime_for_modulus(p, q2 + 1);
+        let (q4, g4) = find_prime_for_modulus(p, q3 + 1);
+
+        let s1 = compute_trig_permanent_fq(p, TrigKind::Sine, q1, g1);
+        let s2 = compute_trig_permanent_fq(p, TrigKind::Sine, q2, g2);
+        let s3 = compute_trig_permanent_fq(p, TrigKind::Sine, q3, g3);
+        let s4 = compute_trig_permanent_fq(p, TrigKind::Sine, q4, g4);
+
+        let s_exact = garner_crt_i128(&[(s1, q1), (s2, q2), (s3, q3)]);
+        println!("s_53 exact = {}", s_exact);
+        assert_eq!(s_exact.rem_euclid(q4 as i128), s4 as i128);
+        assert_eq!(s_exact.rem_euclid(2), 1, "s_53 must be odd!");
+        assert_eq!(s_exact.rem_euclid(p as i128), (p - 1) as i128, "s_53 = -1 mod 53");
     }
 }
