@@ -218,6 +218,12 @@ fn main() {
         "sun-catalog" | "permanent-catalog" | "sun-permanent" => {
             counter_hunter::sun_permanent_catalog::run_sun_permanent_catalog_master();
         }
+        "flip-graph" | "tensor" | "matrix-multiplication" | "kauers" | "tensor-rank" => {
+            counter_hunter::flip_graph_tensor::run_flip_graph_master();
+        }
+        "zarankiewicz" | "c4-free" | "k22" | "k33" | "zarankiewicz-hunter" => {
+            counter_hunter::zarankiewicz_hunter::run_zarankiewicz_master();
+        }
         _ => {
             if cli.low_bound_hunt {
                 let start_m = if cli.start == 0 { 3 } else { cli.start };

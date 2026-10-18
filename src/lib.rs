@@ -10,3 +10,5 @@ pub mod low_bound_bounties;
 pub mod ppl043_breaker;
 pub mod wang_sun_circular;
 pub mod sun_permanent_catalog;
+pub mod flip_graph_tensor;
+pub mod zarankiewicz_hunter;
