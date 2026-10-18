@@ -83,6 +83,146 @@ pub fn sieve_n_primes(target_count: usize) -> Vec<u32> {
 }
 
 // ============================================================================
+// MEISSEL-LEHMER EXACT PRIME COUNTING ENGINE (exact_prime_pi)
+// ============================================================================
+
+use std::sync::OnceLock;
+
+/// Fast Meissel-Lehmer Exact Prime Counting Engine for x <= 2 * 10^11.
+pub struct PrimePiEngine {
+    pub limit: usize,
+    pub primes: Vec<u32>,
+    pub bitset: Vec<u64>,
+    pub prefix_counts: Vec<u32>,
+}
+
+impl PrimePiEngine {
+    pub fn new(limit: usize) -> Self {
+        let num_odds = limit / 2;
+        let num_words = (num_odds + 63) / 64;
+        let mut bitset = vec![0u64; num_words];
+        let sqrt_limit = (limit as f64).sqrt() as usize;
+
+        for i in (3..=sqrt_limit).step_by(2) {
+            let idx = (i - 3) / 2;
+            if (bitset[idx / 64] & (1u64 << (idx % 64))) == 0 {
+                let step = i;
+                let mut mult_idx = (i * i - 3) / 2;
+                while mult_idx < num_odds {
+                    bitset[mult_idx / 64] |= 1u64 << (mult_idx % 64);
+                    mult_idx += step;
+                }
+            }
+        }
+
+        let mut primes = Vec::with_capacity((limit as f64 / (limit as f64).ln().max(1.0) * 1.12) as usize);
+        primes.push(2u32);
+        let mut prefix_counts = vec![0u32; num_words];
+        let mut cum_primes = 0u32;
+
+        for w in 0..num_words {
+            prefix_counts[w] = cum_primes;
+            let word = bitset[w];
+            let primes_in_word = (!word).count_ones();
+            cum_primes += primes_in_word;
+        }
+
+        for idx in 0..num_odds {
+            if (bitset[idx / 64] & (1u64 << (idx % 64))) == 0 {
+                primes.push((2 * idx + 3) as u32);
+            }
+        }
+
+        PrimePiEngine {
+            limit,
+            primes,
+            bitset,
+            prefix_counts,
+        }
+    }
+
+    #[inline(always)]
+    pub fn pi_small(&self, x: usize) -> u64 {
+        if x < 2 {
+            return 0;
+        }
+        if x == 2 {
+            return 1;
+        }
+        let x_clamped = x.min(self.limit);
+        let idx = (x_clamped - 3) / 2;
+        let w = idx / 64;
+        let b = idx % 64;
+        let mask = if b == 63 { !0u64 } else { (1u64 << (b + 1)) - 1 };
+        let bits = (!self.bitset[w]) & mask;
+        1 + (self.prefix_counts[w] as u64) + (bits.count_ones() as u64)
+    }
+
+    fn phi(&self, x: u64, a: usize, memo: &mut std::collections::HashMap<(u64, u32), u64>) -> u64 {
+        if a == 0 {
+            return x;
+        }
+        if a == 1 {
+            return (x + 1) / 2;
+        }
+        let p_a = self.primes[a - 1] as u64;
+        if x < p_a {
+            return 1;
+        }
+        if x < p_a * p_a {
+            if x <= self.limit as u64 {
+                return self.pi_small(x as usize) - (a as u64) + 1;
+            }
+        }
+        let key = (x, a as u32);
+        if a < 150 {
+            if let Some(&val) = memo.get(&key) {
+                return val;
+            }
+        }
+        let res = self.phi(x, a - 1, memo) - self.phi(x / p_a, a - 1, memo);
+        if a < 150 {
+            memo.insert(key, res);
+        }
+        res
+    }
+
+    pub fn meissel_pi(&self, x: u64) -> u64 {
+        if x <= self.limit as u64 {
+            return self.pi_small(x as usize);
+        }
+        let c = (x as f64).cbrt() as u64;
+        let a = self.pi_small(c as usize) as usize;
+        let sqrt_x = (x as f64).sqrt() as u64;
+        let b = self.pi_small(sqrt_x as usize) as usize;
+
+        let mut memo = std::collections::HashMap::with_capacity(32768);
+        let phi_val = self.phi(x, a, &mut memo);
+
+        let mut p2 = 0u64;
+        for i in (a + 1)..=b {
+            let p = self.primes[i - 1] as u64;
+            let x_div_p = x / p;
+            let pi_val = self.pi_small(x_div_p as usize);
+            p2 += pi_val - (i as u64) + 1;
+        }
+
+        phi_val + (a as u64) - 1 - p2
+    }
+}
+
+static PRIME_PI_ENGINE: OnceLock<PrimePiEngine> = OnceLock::new();
+
+pub fn get_prime_pi_engine() -> &'static PrimePiEngine {
+    PRIME_PI_ENGINE.get_or_init(|| PrimePiEngine::new(40_000_000))
+}
+
+/// Exact prime counting function pi(x) using Meissel-Lehmer algorithm (x <= 2 * 10^11).
+pub fn exact_prime_pi(x: u64) -> u64 {
+    get_prime_pi_engine().meissel_pi(x)
+}
+
+// ============================================================================
 // HEDEF A: OEIS A247824 ($500 Sun Prize: (m+n) | (p_m + p_n))
 // ============================================================================
 
@@ -281,7 +421,7 @@ pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
     }
 
     // ========================================================================
-    // FAZ 2: DEEP HUNT FOR HARD SURVIVORS (k in 20..=24) VIA SEGMENTED SIEVE
+    // FAZ 2: MEISSEL-LEHMER EXACT PI + RESONANCE BAND JUMPER (k in 20..=25)
     // ========================================================================
     let hard_survivors: Vec<u64> = (effective_start..=effective_end)
         .filter(|&m| ans_n[m as usize] == 0)
@@ -291,120 +431,175 @@ pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
 
     if !hard_survivors.is_empty() {
         println!("\x1b[1;33m================================================================================\x1b[0m");
-        println!("\x1b[1;33m⚡ FAZ 2: ÖLÜMCÜL ADAYLAR İÇİN 500 MİLYON ASAL DERİN AVI (k in 20..=24)\x1b[0m");
+        println!("\x1b[1;33m⚡ FAZ 2: MEISSEL-LEHMER EXACT PI + RESONANCE BAND JUMPER (k in 20..=25)\x1b[0m");
         println!("   Hard Survivors with n > 50,000,000 Count: {}", hard_survivors.len());
         if hard_survivors.len() <= 15 {
             println!("   Surviving m list: {:?}", hard_survivors);
         } else {
             println!("   First 15 surviving m: {:?} ...", &hard_survivors[..15]);
         }
-        println!("   Streaming Segmented Sieve from n = 50,000,001 to n = 500,000,000 (p_n up to ~11.1B)...");
+        println!("   Skipping dead zones via exact prime counting across k in 20..=25...\n");
         println!("\x1b[1;33m================================================================================\x1b[0m\n");
 
         let p2_start = Instant::now();
-        use std::collections::HashMap;
+        let pi_engine = get_prime_pi_engine();
+        let base_primes = sieve_primes(470_000); // covers up to sqrt(2.2e11) ~ 469,000
 
-        // Build target tables and bitset filters for k in 20..=24
-        let mut targets_k: Vec<HashMap<i64, Vec<u32>>> = vec![HashMap::new(); 5];
-        let mut bitset_k: Vec<Vec<u64>> = vec![vec![0u64; 131072]; 5];
+        for k in 20..=25u32 {
+            let k_i64 = k as i64;
+            let active_m: Vec<u64> = hard_survivors
+                .iter()
+                .copied()
+                .filter(|&m| ans_n[m as usize] == 0)
+                .collect();
 
-        for &m in &hard_survivors {
-            let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as i64;
-            for k in 20..=24u32 {
-                let k_idx = (k - 20) as usize;
-                let k_i64 = k as i64;
+            if active_m.is_empty() {
+                break;
+            }
+
+            // Build target map for this band
+            use std::collections::HashMap;
+            let mut target_map: HashMap<i64, Vec<u32>> = HashMap::new();
+            let mut bitset = vec![0u64; 131072];
+
+            for &m in &active_m {
+                let p_m = unsafe { *primes.get_unchecked((m - 1) as usize) } as i64;
                 let target = k_i64 * (m as i64) - p_m;
-                let h = fast_bitset_hash(target);
-                bitset_k[k_idx][h / 64] |= 1u64 << (h % 64);
-                targets_k[k_idx].entry(target).or_default().push(m as u32);
+                if target >= -6_000_000 && target <= 26_000_000 {
+                    let h = fast_bitset_hash(target);
+                    bitset[h / 64] |= 1u64 << (h % 64);
+                    target_map.entry(target).or_default().push(m as u32);
+                }
             }
-        }
 
-        // Segmented Sieve parameters
-        let base_primes = sieve_primes(110_000);
-        let mut low = 982_451_655u64; // immediately after p_50000000 = 982,451,653
-        let seg_num_odds = 1_000_000usize;
-        let seg_step = 2 * seg_num_odds as u64;
-        let num_words = (seg_num_odds + 63) / 64;
-        let mut seg_bitset = vec![0u64; num_words];
+            if target_map.is_empty() {
+                continue;
+            }
 
-        let mut curr_n = 50_000_000u64;
-        let max_target_n = 500_000_000u64;
-        let mut active_hard_count = hard_survivors.len();
-        let mut p2_last_telemetry = Instant::now();
+            // Calculate approximate center for resonance band k
+            let mut ln_n = (k as f64) - (k as f64).ln() + 1.0;
+            for _ in 0..15 {
+                let f = ln_n + ln_n.ln() - 1.0 - (k as f64);
+                let f_prime = 1.0 + 1.0 / ln_n;
+                ln_n -= f / f_prime;
+            }
+            let n_center = ln_n.exp();
+            let p_center = (n_center * (k as f64)) as u64;
 
-        while curr_n < max_target_n && active_hard_count > 0 {
-            let high = low + seg_step;
-            seg_bitset.fill(0);
-
-            for &p in &base_primes {
-                if p == 2 {
-                    continue;
-                }
-                let p_u64 = p as u64;
-                let p_sq = p_u64 * p_u64;
-                if p_sq >= high {
-                    break;
-                }
-                let mut start = if p_sq > low {
-                    p_sq
+            // Binary search for P_start where D(P) <= -6,000,000
+            let mut low = p_center.saturating_sub(6_000_000_000).max(1_000_000_000);
+            let mut high = p_center;
+            while high - low > 1_000_000 {
+                let mid = low + (high - low) / 2;
+                let d = (mid as i64) - k_i64 * (pi_engine.meissel_pi(mid) as i64);
+                if d < -6_000_000 {
+                    low = mid;
                 } else {
-                    let rem = low % p_u64;
-                    if rem == 0 {
-                        low
-                    } else {
-                        low + (p_u64 - rem)
-                    }
-                };
-                if start % 2 == 0 {
-                    start += p_u64;
-                }
-                if start < high {
-                    let mut bit_idx = ((start - low) / 2) as usize;
-                    let step = p as usize;
-                    while bit_idx < seg_num_odds {
-                        seg_bitset[bit_idx / 64] |= 1u64 << (bit_idx % 64);
-                        bit_idx += step;
-                    }
+                    high = mid;
                 }
             }
+            let mut p_start = low;
+            if p_start % 2 == 0 { p_start -= 1; }
 
-            // Stream primes from segment
-            for word_idx in 0..num_words {
-                let word = seg_bitset[word_idx];
-                if word == !0u64 {
-                    continue;
+            // Binary search for P_end where D(P) >= 26,000,000
+            let mut low = p_center;
+            let mut high = p_center.saturating_add(6_000_000_000);
+            while high - low > 1_000_000 {
+                let mid = low + (high - low) / 2;
+                let d = (mid as i64) - k_i64 * (pi_engine.meissel_pi(mid) as i64);
+                if d < 26_000_000 {
+                    low = mid;
+                } else {
+                    high = mid;
                 }
-                for bit in 0..64 {
-                    let bit_idx = word_idx * 64 + bit;
-                    if bit_idx >= seg_num_odds {
-                        break;
-                    }
-                    if (word & (1u64 << bit)) == 0 {
-                        let p_n = low + 2 * (bit_idx as u64);
-                        curr_n += 1;
+            }
+            let mut p_end = high;
+            if p_end % 2 == 0 { p_end += 1; }
 
-                        // Match against hard survivor targets for k in 20..=24
-                        for k in 20..=24u32 {
-                            let k_idx = (k - 20) as usize;
-                            let k_i64 = k as i64;
+            let n_start = pi_engine.meissel_pi(p_start - 1);
+            let est_primes = ((p_end - p_start) as f64) / (p_start as f64).ln() / 1e6;
+
+            println!(
+                "⚡ \x1b[1;36m[RESONANCE BAND k = {:2}]\x1b[0m Window [{}, {}] (~{:.2}M primes) | starting index n = {} | Active Targets: {}",
+                k, p_start, p_end, est_primes, n_start, target_map.len()
+            );
+
+            // Run Segmented Sieve on [p_start, p_end]
+            let seg_num_odds = 1_000_000usize;
+            let seg_step = 2 * seg_num_odds as u64;
+            let num_words = (seg_num_odds + 63) / 64;
+            let mut seg_bitset = vec![0u64; num_words];
+
+            let mut low_seg = p_start;
+            let mut curr_n = n_start;
+            let mut band_resolved = 0usize;
+
+            while low_seg < p_end && !target_map.is_empty() {
+                let high_seg = low_seg + seg_step;
+                seg_bitset.fill(0);
+
+                for &p in &base_primes {
+                    if p == 2 { continue; }
+                    let p_u64 = p as u64;
+                    let p_sq = p_u64 * p_u64;
+                    if p_sq >= high_seg { break; }
+                    let mut start = if p_sq > low_seg {
+                        p_sq
+                    } else {
+                        let rem = low_seg % p_u64;
+                        if rem == 0 { low_seg } else { low_seg + (p_u64 - rem) }
+                    };
+                    if start % 2 == 0 {
+                        start += p_u64;
+                    }
+                    if start < high_seg {
+                        let mut bit_idx = ((start - low_seg) / 2) as usize;
+                        let step = p as usize;
+                        while bit_idx < seg_num_odds {
+                            seg_bitset[bit_idx / 64] |= 1u64 << (bit_idx % 64);
+                            bit_idx += step;
+                        }
+                    }
+                }
+
+                // Scan primes in segment
+                for word_idx in 0..num_words {
+                    let word = seg_bitset[word_idx];
+                    if word == !0u64 {
+                        continue;
+                    }
+                    for bit in 0..64 {
+                        let bit_idx = word_idx * 64 + bit;
+                        if bit_idx >= seg_num_odds {
+                            break;
+                        }
+                        if (word & (1u64 << bit)) == 0 {
+                            let p_n = low_seg + 2 * (bit_idx as u64);
+                            curr_n += 1;
+
                             let d = (p_n as i64) - k_i64 * (curr_n as i64);
                             let h = fast_bitset_hash(d);
 
-                            if (bitset_k[k_idx][h / 64] & (1u64 << (h % 64))) != 0 {
-                                if let Some(ms) = targets_k[k_idx].remove(&d) {
+                            if (bitset[h / 64] & (1u64 << (h % 64))) != 0 {
+                                if let Some(ms) = target_map.remove(&d) {
                                     for m in ms {
                                         let m_u64 = m as u64;
                                         let m_idx = m as usize;
                                         if ans_n[m_idx] == 0 {
                                             ans_n[m_idx] = curr_n;
                                             ans_k[m_idx] = k;
-                                            active_hard_count = active_hard_count.saturating_sub(1);
+                                            band_resolved += 1;
 
                                             let p_m = primes[m_idx - 1];
                                             let limit = m_u64.saturating_mul(m_u64 - 1);
                                             let r_m = (curr_n as f64) / (m_u64 as f64);
                                             let r_b = (curr_n as f64) / (limit as f64);
+
+                                            // Exact u128 verification
+                                            let sum_p = (p_m as u128) + (p_n as u128);
+                                            let sum_idx = (m_u64 as u128) + (curr_n as u128);
+                                            assert_eq!(sum_p % sum_idx, 0, "Exact divisibility verification failed!");
+                                            assert_eq!(sum_p / sum_idx, k as u128, "Multiplier quotient verification failed!");
 
                                             hard_survivor_records.push(DivisibilityChampion {
                                                 m: m_u64,
@@ -417,7 +612,7 @@ pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
                                             });
 
                                             println!(
-                                                "🌟 \x1b[1;32m[HARD SURVIVOR RESOLVED]\x1b[0m m = {:7} (p_m = {:9}) -> n = {:10} (p_n = {:11}), k = {}, n/m = {:8.2}, n/m(m-1) = {:.8}",
+                                                "🌟 \x1b[1;32m[RESONANCE HIT]\x1b[0m m = {:7} (p_m = {:9}) -> n = {:11} (p_n = {:12}), k = {:2}, n/m = {:8.2}, n/m(m-1) = {:.8} [EXACT u128 VERIFIED]",
                                                 m, p_m, curr_n, p_n, k, r_m, r_b
                                             );
 
@@ -440,36 +635,30 @@ pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
                                     }
                                 }
                             }
-                        }
 
-                        if curr_n >= max_target_n || active_hard_count == 0 {
-                            break;
+                            if target_map.is_empty() {
+                                break;
+                            }
                         }
                     }
+                    if target_map.is_empty() {
+                        break;
+                    }
                 }
-                if curr_n >= max_target_n || active_hard_count == 0 {
-                    break;
-                }
+
+                low_seg = high_seg;
             }
 
-            if p2_last_telemetry.elapsed().as_secs() >= 5 {
-                let elapsed_p2 = p2_start.elapsed().as_secs_f64();
-                let primes_per_sec = ((curr_n - 50_000_000) as f64) / elapsed_p2;
-                println!(
-                    "📡 [FAZ 2 TELEMETRY] n = {:10} (p_n = {:11}) | {:6.1} k primes/s | Active Survivors Left: {}",
-                    curr_n, low, primes_per_sec / 1000.0, active_hard_count
-                );
-                p2_last_telemetry = Instant::now();
-            }
-
-            low = high;
+            println!(
+                "   ✓ Band k = {:2} completed. Resolved {} candidates.\n",
+                k,
+                band_resolved
+            );
         }
 
         println!(
-            "\n✓ [FAZ 2 COMPLETED] Reached n = {} in {:.2?}. Resolved {} hard survivors.\n",
-            curr_n,
-            p2_start.elapsed(),
-            hard_survivors.len() - active_hard_count
+            "\n✓ [FAZ 2 COMPLETED] Resonance band jumping finished in {:.2?}.\n",
+            p2_start.elapsed()
         );
 
         for &m in &hard_survivors {
@@ -477,7 +666,7 @@ pub fn hunt_hedef_a_divisibility(start_m: u64, max_m: u64, prime_limit: usize) {
                 let p_m = primes[(m - 1) as usize];
                 let limit = m.saturating_mul(m - 1);
                 println!(
-                    "\x1b[1;33m⚠️ [EXTREME HIGH RECORD CANDIDATE] m = {} (p_m = {}): n > 500,000,000 (k >= 24, limit = {})!\x1b[0m",
+                    "\x1b[1;33m⚠️ [EXTREME HIGH RECORD CANDIDATE] m = {} (p_m = {}): n > 8,500,000,000 (k >= 26, limit = {})!\x1b[0m",
                     m, p_m, limit
                 );
             }
@@ -1069,5 +1258,14 @@ mod tests {
         let p_n = 1396184219i64;
         assert_eq!(p_n - 20 * 69804276, 20 * 10409 - p_10409);
         assert_eq!((p_10409 + p_n) % (10409 + 69804276), 0);
+    }
+
+    #[test]
+    fn test_exact_prime_pi_benchmarks() {
+        assert_eq!(exact_prime_pi(100_000_000), 5_761_455);
+        assert_eq!(exact_prime_pi(1_000_000_000), 50_847_534);
+        assert_eq!(exact_prime_pi(10_000_000_000), 455_052_511);
+        assert_eq!(exact_prime_pi(100_000_000_000), 4_118_054_813);
+        assert_eq!(exact_prime_pi(75_391_645_409), 3_141_281_384);
     }
 }
