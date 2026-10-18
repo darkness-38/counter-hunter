@@ -462,30 +462,58 @@ pub fn print_algebraic_decomposition(decomp: &TensorDecomposition) {
     println!("Verified 100% Exact under verify_tensor_decomposition: {}\n", decomp.verify());
 }
 
-/// Continuous Deep Hunt Engine with 8 Rayon threads, Plus/Minus Transitions, and Live Telemetry
+/// Save confirmed Rank 22 breakthrough certificate and trigger git commit & push
+pub fn save_and_commit_breakthrough(decomp: &TensorDecomposition) {
+    let filename = "RANK_22_CERTIFICATE.txt";
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(filename)
+        .expect("Failed to open RANK_22_CERTIFICATE.txt");
+
+    writeln!(file, "================================================================================").unwrap();
+    writeln!(file, "🚨 HISTORIC BREAKTHROUGH: <3,3,3> MATRIX MULTIPLICATION TENSOR RANK 22").unwrap();
+    writeln!(file, "Exact F_2 Verification (verify_tensor_decomposition): {}", decomp.verify()).unwrap();
+    writeln!(file, "Rank: R = {}", decomp.rank()).unwrap();
+    writeln!(file, "Total Additive Weight: {}", decomp.total_weight()).unwrap();
+    writeln!(file, "--------------------------------------------------------------------------------").unwrap();
+    for (r, &(u, v, w)) in decomp.terms.iter().enumerate() {
+        writeln!(file, "Term {:2}: U = 0x{:04X}, V = 0x{:04X}, W = 0x{:04X}", r + 1, u, v, w).unwrap();
+    }
+    writeln!(file, "================================================================================\n").unwrap();
+
+    save_record_certificate(decomp, "discovered_counterexamples.txt", "<3,3,3>-Rank-22");
+
+    let _ = std::process::Command::new("git")
+        .args(["add", "RANK_22_CERTIFICATE.txt", "discovered_counterexamples.txt"])
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", "feat: HISTORIC BREAKTHROUGH <3,3,3> matrix multiplication tensor rank 22 discovered!"])
+        .status();
+    let _ = std::process::Command::new("git")
+        .args(["push", "origin", "main"])
+        .status();
+}
+
+/// Continuous Deep Hunt Engine with 8 Rayon threads focused 100% on <3, 3, 3> Rank 22
 pub fn run_flip_graph_deep(duration_secs: u64) {
     println!("\n╔═══════════════════════════════════════════════════════════════════════════════╗");
     println!("║  KAUERS-MOOSBAUER DEEP FLIP-GRAPH TENSOR HUNTER (Rayon 8-Core Swarm)        ║");
-    println!("║  Targets: <2,3,3> R <= 15 Hunt (Cores 0..4) & <3,3,3> R <= 22 Hunt (Cores 4..8)║");
+    println!("║  TARGET: <3, 3, 3> Matrix Multiplication Tensor Rank 23 -> 22               ║");
     println!("╚═══════════════════════════════════════════════════════════════════════════════╝\n");
 
     let total_flips = Arc::new(AtomicU64::new(0));
-    let best_r_233 = Arc::new(AtomicUsize::new(18));
-    let best_w_233 = Arc::new(AtomicUsize::new(54));
     let best_r_333 = Arc::new(AtomicUsize::new(23));
     let best_w_333 = Arc::new(AtomicUsize::new(153));
     let stop_signal = Arc::new(AtomicBool::new(false));
 
-    // Seed initial decompositions
-    let naive_233 = naive_decomposition(2, 3, 3);
-    assert!(naive_233.verify(), "Naive <2,3,3> verification failed!");
     let laderman_333 = laderman_23_decomposition();
     assert!(laderman_333.verify(), "Laderman 23 verification failed!");
+    println!("✓ Laderman (1976) R = 23 seed verified on F_2 (Initial Weight = 153).");
 
-    // Spawn 5-second telemetry background monitor
+    // Spawn 10-second telemetry background monitor
     let total_flips_tele = Arc::clone(&total_flips);
-    let best_r_233_tele = Arc::clone(&best_r_233);
-    let best_w_233_tele = Arc::clone(&best_w_233);
     let best_r_333_tele = Arc::clone(&best_r_333);
     let best_w_333_tele = Arc::clone(&best_w_333);
     let stop_signal_tele = Arc::clone(&stop_signal);
@@ -495,15 +523,13 @@ pub fn run_flip_graph_deep(duration_secs: u64) {
         let mut last_flips = 0u64;
         let mut last_time = Instant::now();
         while !stop_signal_tele.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(5000));
+            std::thread::sleep(Duration::from_millis(10000));
             let current_flips = total_flips_tele.load(Ordering::Relaxed);
             let dt = last_time.elapsed().as_secs_f64();
             let flips_per_sec = ((current_flips - last_flips) as f64) / dt;
             last_flips = current_flips;
             last_time = Instant::now();
 
-            let r233 = best_r_233_tele.load(Ordering::Relaxed);
-            let w233 = best_w_233_tele.load(Ordering::Relaxed);
             let r333 = best_r_333_tele.load(Ordering::Relaxed);
             let w333 = best_w_333_tele.load(Ordering::Relaxed);
 
@@ -512,8 +538,8 @@ pub fn run_flip_graph_deep(duration_secs: u64) {
             let ss = elapsed_total % 60;
 
             println!(
-                "📡 [FLIP TELEMETRY {:02}:{:02}] {:5.2} M flips/s | <2,3,3> Best R = {:2} (W = {:3}) | <3,3,3> Best R = {:2} (W = {:3}) | Total: {:.2} M flips",
-                mm, ss, flips_per_sec / 1e6, r233, w233, r333, w333, (current_flips as f64) / 1e6
+                "📡 [FLIP TELEMETRY {:02}:{:02}] {:5.2} M flips/s | <3,3,3> Best R = {:2} (W = {:3}) | Total Flips: {:.2} M",
+                mm, ss, flips_per_sec / 1e6, r333, w333, (current_flips as f64) / 1e6
             );
 
             if duration_secs > 0 && elapsed_total >= duration_secs {
@@ -524,22 +550,30 @@ pub fn run_flip_graph_deep(duration_secs: u64) {
     });
 
     let num_threads = rayon::current_num_threads();
-    println!("⚡ Launched {} Rayon worker threads. Active search underway...\n", num_threads);
+    println!("⚡ Launched {} Rayon worker threads locked 100% on <3, 3, 3>...\n", num_threads);
 
     (0..num_threads).into_par_iter().for_each(|thread_id| {
         let mut rng = FastRng::new(0x9e3779b97f4a7c15 ^ ((thread_id as u64 + 1) * 0x517cc1b727220a95));
+        let (n, m, p) = (3, 3, 3);
+        let mut current = laderman_333.clone();
 
-        // Threads 0..4: Target <2, 3, 3>
-        // Threads 4..8: Target <3, 3, 3>
-        let is_target_333 = thread_id >= num_threads / 2;
-        let (n, m, p) = if is_target_333 { (3, 3, 3) } else { (2, 3, 3) };
-        let mut current = if is_target_333 { laderman_333.clone() } else { naive_233.clone() };
+        // Diversify starting states across threads by applying initial flips
+        for _ in 0..(thread_id * 50) {
+            let flips = find_all_flips(&current.terms);
+            if !flips.is_empty() {
+                let f_idx = rng.gen_range(flips.len());
+                apply_flip(&mut current.terms, flips[f_idx]);
+                let _ = reduce_terms(&mut current.terms);
+            }
+        }
 
         let mut best_terms = current.terms.clone();
         let mut best_rank = current.rank();
         let mut best_weight = current.total_weight();
 
-        let mut temperature = 2.0f64;
+        // Independent temperature spectrum T in [0.05, 0.40]
+        let base_temp = 0.05 + 0.05 * (thread_id as f64);
+        let mut temperature = base_temp;
         let mut steps_without_reduction = 0usize;
         let mut in_high_temp_phase = 0usize;
 
@@ -600,46 +634,41 @@ pub fn run_flip_graph_deep(duration_secs: u64) {
                     best_terms = current.terms.clone();
                     steps_without_reduction = 0;
 
-                    if !is_target_333 {
-                        let _ = best_r_233.fetch_min(best_rank, Ordering::Relaxed);
-                        let _ = best_w_233.fetch_min(best_weight, Ordering::Relaxed);
-                    } else {
-                        let _ = best_r_333.fetch_min(best_rank, Ordering::Relaxed);
-                        let _ = best_w_333.fetch_min(best_weight, Ordering::Relaxed);
-                    }
+                    let _ = best_r_333.fetch_min(best_rank, Ordering::Relaxed);
+                    let _ = best_w_333.fetch_min(best_weight, Ordering::Relaxed);
 
-                    // Check for World Record Breakthrough!
-                    if (!is_target_333 && best_rank <= 15) || (is_target_333 && best_rank <= 22) {
+                    // Check for World Record Breakthrough: R <= 22!
+                    if best_rank <= 22 {
                         let is_valid = verify_tensor_decomposition(&best_terms, n, m, p);
                         if is_valid {
                             println!(
-                                "\n🚨 \x1b[1;31m[WORLD RECORD BROKEN]\x1b[0m Thread {} found verified Rank R = {} for <{},{},{}> (Weight = {})!",
-                                thread_id, best_rank, n, m, p, best_weight
+                                "\n🚨 \x1b[1;31m[HISTORIC BREAKTHROUGH: <3,3,3> RANK 22 FOUND!]\x1b[0m Thread {} discovered verified Rank R = {} for <3,3,3> (Weight = {})!",
+                                thread_id, best_rank, best_weight
                             );
-                            let tag = format!("<{},{},{}>-Rank-{}", n, m, p, best_rank);
                             let decomp = TensorDecomposition::new(n, m, p, best_terms.clone());
-                            save_record_certificate(&decomp, "discovered_counterexamples.txt", &tag);
+                            save_and_commit_breakthrough(&decomp);
                             print_algebraic_decomposition(&decomp);
+                            stop_signal.store(true, Ordering::Relaxed);
                         }
                     }
                 }
 
-                // Cool temperature slowly
-                temperature = (temperature * 0.99995).max(0.05);
+                // Cool temperature slowly toward base_temp
+                temperature = (temperature * 0.99995).max(base_temp);
 
-                // Plus-Transition trigger on local minimum trap
-                if steps_without_reduction >= 50_000 {
+                // 23 -> 24 / 25 -> 23 -> 22 Jump Strategy on trap
+                if steps_without_reduction >= 200_000 {
                     current.terms = best_terms.clone();
                     steps_without_reduction = 0;
-                    temperature = 2.5;
-                } else if steps_without_reduction >= 25_000 {
+                    temperature = base_temp * 1.5;
+                } else if steps_without_reduction >= 100_000 {
                     if rng.next_u64() % 2 == 0 {
                         plus_transition_split(&mut current.terms, &mut rng, n, m, p);
                     } else {
                         plus_transition_zero_pair(&mut current.terms, &mut rng, n, m, p);
                     }
-                    temperature = 3.5;
-                    in_high_temp_phase = 2_500;
+                    temperature = 4.0;
+                    in_high_temp_phase = 5_000;
                 }
             } else {
                 plus_transition_split(&mut current.terms, &mut rng, n, m, p);
