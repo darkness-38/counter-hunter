@@ -577,9 +577,9 @@ pub fn run_exact_zarankiewicz_master() {
         let reiman = reiman_bound(n);
         let valid = verify_k22_free(&matrix, n);
         let record_msg = if n == 17 && ones == 74 {
-            "🚨 [NEW RECORD: z(17; 2,2) = 74 (Previous was 73)]"
+            "★ [OEIS A006855 Benchmark: z(17; 2,2) = 74 reached]"
         } else if n == 18 && ones == 81 {
-            "🚨 [NEW RECORD: z(18; 2,2) = 81 (Previous was 80)]"
+            "★ [OEIS A006855 Benchmark: z(18; 2,2) = 81 reached]"
         } else if n == 21 && ones == 105 {
             "🏆 [100% REIMAN BOUND EQUALITY: z(21; 2,2) = 105]"
         } else {

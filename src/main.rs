@@ -220,18 +220,16 @@ fn main() {
         }
         "exact" | "exact-solvers" | "solvers" => {
             counter_hunter::flip_graph_tensor::run_tensor_solver_master();
+            counter_hunter::flip_graph_tensor::prove_laderman_orbit_impossibility();
+            counter_hunter::flip_graph_tensor::meet_in_the_middle_rank22_collider(0);
             counter_hunter::zarankiewicz_hunter::run_exact_zarankiewicz_master();
         }
         "flip-graph" | "tensor" | "matrix-multiplication" | "kauers" | "tensor-rank" | "flip-deep" => {
             counter_hunter::flip_graph_tensor::run_tensor_solver_master();
         }
-        "tensor-sym" | "tensor-symmetric" | "sym-tensor" | "rank22" | "rank-22" => {
-            let duration_secs = if cli.end > 0 && cli.end != 10_000_000_000 && cli.end != 100_000_000 {
-                cli.end
-            } else {
-                15
-            };
-            counter_hunter::flip_graph_tensor::hunt_symmetric_rank22(duration_secs);
+        "tensor-sym" | "tensor-symmetric" | "sym-tensor" | "rank22" | "rank-22" | "no-go" | "mitm" => {
+            counter_hunter::flip_graph_tensor::prove_laderman_orbit_impossibility();
+            counter_hunter::flip_graph_tensor::meet_in_the_middle_rank22_collider(0);
         }
         "zarankiewicz" | "c4-free" | "k22" | "k33" | "zarankiewicz-hunter" => {
             counter_hunter::zarankiewicz_hunter::run_exact_zarankiewicz_master();
