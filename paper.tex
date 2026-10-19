@@ -1,23 +1,52 @@
 \documentclass[11pt,reqno]{amsart}
 
+\usepackage[a4paper,margin=1in,top=1in,bottom=1in,headheight=14pt]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
-\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
 \usepackage{microtype}
+\usepackage{hyperref}
+
+% --------------------------------------------------------------------------
+% Hyperlink Setup
+% --------------------------------------------------------------------------
+\definecolor{darkblue}{rgb}{0.0, 0.2, 0.6}
+\definecolor{codegray}{rgb}{0.96, 0.96, 0.97}
+\definecolor{codeframe}{rgb}{0.84, 0.85, 0.88}
 
 \hypersetup{
     colorlinks=true,
-    linkcolor=blue,
-    citecolor=blue,
-    urlcolor=blue
+    linkcolor=darkblue,
+    citecolor=darkblue,
+    urlcolor=darkblue
 }
 
 % --------------------------------------------------------------------------
-% Theorem Environments
+% Code Listing Setup
+% --------------------------------------------------------------------------
+\lstset{
+    backgroundcolor=\color{codegray},
+    basicstyle=\small\ttfamily,
+    frame=single,
+    rulecolor=\color{codeframe},
+    framerule=0.8pt,
+    xleftmargin=10pt,
+    framexleftmargin=6pt,
+    framexrightmargin=6pt,
+    framextopmargin=5pt,
+    framexbottommargin=5pt,
+    breaklines=true,
+    breakatwhitespace=true,
+    showstringspaces=false
+}
+
+% --------------------------------------------------------------------------
+% Theorem Environments (Distinct Counters for Lemma and Theorem)
 % --------------------------------------------------------------------------
 \theoremstyle{plain}
 \newtheorem{theorem}{Theorem}
-\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{lemma}{Lemma}
 \newtheorem{proposition}[theorem]{Proposition}
 \newtheorem{corollary}[theorem]{Corollary}
 
@@ -29,7 +58,7 @@
 % --------------------------------------------------------------------------
 % Document Metadata
 % --------------------------------------------------------------------------
-\title[On the Infeasibility of Rank-22 Decompositions for $\langle 3,3,3 \rangle$]{On the Infeasibility of Rank-22 Decompositions for $\langle 3, 3, 3 \rangle$ Matrix Multiplication via Laderman Sub-Orbits over $\mathbb{F}_2$}
+\title[Infeasibility of Rank-22 Decompositions for $\langle 3,3,3 \rangle$ via Laderman Sub-Orbits]{On the Infeasibility of Rank-22 Decompositions for $\langle 3, 3, 3 \rangle$ Matrix Multiplication via Laderman Sub-Orbits over $\mathbb{F}_2$}
 
 \author{Hamza Mert Da\c{s}demir}
 \address{Advanced Agentic Mathematics \& Algorithmic Discovery Group}
@@ -59,7 +88,7 @@ The bilinear complexity of matrix multiplication is governed by the tensor rank 
 \begin{equation}
 \mathcal{T}_{\langle n, m, p \rangle} = \sum_{i=1}^n \sum_{j=1}^m \sum_{k=1}^p (E_{i,j} \otimes E_{j,k} \otimes E_{k,i}) \;\in\; \mathbb{F}^{n \times m} \otimes \mathbb{F}^{m \times p} \otimes \mathbb{F}^{p \times n},
 \end{equation}
-where $E_{a,b}$ represents the standard basis matrix containing $1$ at coordinate $(a, b)$ and $0$ elsewhere. A rank-$R$ decomposition of $\mathcal{T}_{\langle n, m, p \rangle}$ is an explicit linear representation:
+where $E_{a,b}$ denotes the standard basis matrix containing $1$ at coordinate $(a, b)$ and $0$ elsewhere. A rank-$R$ decomposition of $\mathcal{T}_{\langle n, m, p \rangle}$ is an explicit linear representation:
 \begin{equation}
 \mathcal{T}_{\langle n, m, p \rangle} = \sum_{r=1}^R U_r \otimes V_r \otimes W_r, \quad U_r \in \mathbb{F}^{n \times m}, \; V_r \in \mathbb{F}^{m \times p}, \; W_r \in \mathbb{F}^{p \times n}.
 \end{equation}
@@ -102,17 +131,28 @@ The cyclic shift operator $\sigma$ acts on matrix coordinates by shifting indice
 \sigma(i, j) = \bigl((i + 1) \bmod 3, \; (j + 1) \bmod 3\bigr).
 \end{equation}
 
-Laderman's $23$ terms decompose canonically into seven $3$-element orbits under $\mathbb{Z}_3$ trilinear rotation $(U \mapsto V \mapsto W \mapsto U)$, together with two invariant fixed-point terms:
-\begin{enumerate}
-    \item \textbf{Orbit 1 ($\mathcal{O}_1$):} Terms $\{1, 2, 3\}$
-    \item \textbf{Orbit 2 ($\mathcal{O}_2$):} Terms $\{4, 5, 6\}$
-    \item \textbf{Orbit 3 ($\mathcal{O}_3$):} Terms $\{7, 8, 9\}$
-    \item \textbf{Orbit 4 ($\mathcal{O}_4$):} Terms $\{10, 11, 12\}$
-    \item \textbf{Orbit 5 ($\mathcal{O}_5$):} Terms $\{13, 14, 15\}$
-    \item \textbf{Orbit 6 ($\mathcal{O}_6$):} Terms $\{16, 17, 18\}$
-    \item \textbf{Orbit 7 ($\mathcal{O}_7$):} Terms $\{19, 20, 22\}$
-    \item \textbf{Fixed-Point Components:} Terms $\{21, 23\}$
-\end{enumerate}
+Laderman's $23$ terms decompose canonically into seven $3$-element orbits under $\mathbb{Z}_3$ trilinear rotation $(U \mapsto V \mapsto W \mapsto U)$, together with two invariant fixed-point terms, as displayed in Table~\ref{tab:laderman-orbits}.
+
+\begin{table}[htbp]
+\centering
+\caption{Canonical decomposition of Laderman's 23 terms into $\mathbb{Z}_3$ trilinear orbits.}
+\label{tab:laderman-orbits}
+\vspace{-2mm}
+\begin{tabular}{lll}
+\toprule
+Orbit / Component & Symmetry Group Action & Constituent Laderman Terms \\
+\midrule
+Orbit 1 ($\mathcal{O}_1$) & $\mathbb{Z}_3$ cyclic rotation & $\{1, 2, 3\}$ \\
+Orbit 2 ($\mathcal{O}_2$) & $\mathbb{Z}_3$ cyclic rotation & $\{4, 5, 6\}$ \\
+Orbit 3 ($\mathcal{O}_3$) & $\mathbb{Z}_3$ cyclic rotation & $\{7, 8, 9\}$ \\
+Orbit 4 ($\mathcal{O}_4$) & $\mathbb{Z}_3$ cyclic rotation & $\{10, 11, 12\}$ \\
+Orbit 5 ($\mathcal{O}_5$) & $\mathbb{Z}_3$ cyclic rotation & $\{13, 14, 15\}$ \\
+Orbit 6 ($\mathcal{O}_6$) & $\mathbb{Z}_3$ cyclic rotation & $\{16, 17, 18\}$ \\
+Orbit 7 ($\mathcal{O}_7$) & $\mathbb{Z}_3$ cyclic rotation & $\{19, 20, 22\}$ \\
+Fixed-Point Terms & Invariant under rotation & $\{21, 23\}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % --------------------------------------------------------------------------
 \section{Quotient-Space Dimension Reduction and the No-Go Theorem}
@@ -136,7 +176,7 @@ For the nine target slices $B_0, \dots, B_8$ to reside in the linear span of the
 \pi(\operatorname{Span}(B_0, \dots, B_8)) \subseteq \pi(\operatorname{Span}(J_1, J_2, J_3, J_4)).
 \end{equation}
 
-This obstruction is formalized by the following fundamental lemma.
+This structural barrier is formalized by the following fundamental lemma.
 
 \begin{lemma}[Grassmann Quotient Dimension Lemma]\label{lem:grassmann}
 Let $V$ be a finite-dimensional vector space over a field $\mathbb{F}$, let $W \subseteq V$ be a linear subspace, and let $\pi \colon V \to V/W$ denote the canonical quotient projection. For any subset of $k$ vectors $\{x_1, \dots, x_k\} \subset V$,
@@ -165,23 +205,24 @@ Applying Lemma~\ref{lem:grassmann} to our setting with $k = 4$, if $\dim(\pi(\op
 
 \subsection{Exhaustive Classification of All $\binom{7}{6} = 7$ Sub-Orbit Bases}
 
-We performed bitwise Gauss--Jordan elimination on an $81$-row augmented bit-matrix over $\mathbb{F}_2$ for all $7$ possible sub-orbit configurations. The exact results are summarized in Table~\ref{tab:suborbits}.
+We performed bitwise Gauss--Jordan elimination on an $81$-row augmented bit-matrix over $\mathbb{F}_2$ for all $7$ possible sub-orbit configurations. The exact findings are summarized in Table~\ref{tab:suborbits}.
 
 \begin{table}[htbp]
 \centering
 \caption{Classification of all $\binom{7}{6} = 7$ sub-orbit configurations modulo $V_{18}$.}
 \label{tab:suborbits}
+\vspace{-2mm}
 \begin{tabular}{ccccc}
 \toprule
-Config. & Excluded Orbit & $\dim(V_{18})$ & $\dim(\pi(\operatorname{Span}(B)))$ & Feasibility ($k \le 4$) \\
+Config. & Excluded Orbit & $\dim(V_{18})$ & $\dim(\pi(\operatorname{Span}(B)))$ & Status ($k \le 4$) \\
 \midrule
-1 & $\mathcal{O}_1$ & 18 & \textbf{5} & Strictly Infeasible \\
-2 & $\mathcal{O}_2$ & 18 & \textbf{5} & Strictly Infeasible \\
-3 & $\mathcal{O}_3$ & 18 & \textbf{4} & Conditionally Feasible \\
-4 & $\mathcal{O}_4$ & 18 & \textbf{5} & Strictly Infeasible \\
-5 & $\mathcal{O}_5$ & 18 & \textbf{4} & Conditionally Feasible \\
-6 & $\mathcal{O}_6$ & 18 & \textbf{5} & Strictly Infeasible \\
-7 & $\mathcal{O}_7$ & 18 & \textbf{5} & Strictly Infeasible \\
+1 & $\mathcal{O}_1$ & 18 & \textbf{5} & \textbf{Strictly Infeasible} ($\dim = 5 > 4$) \\
+2 & $\mathcal{O}_2$ & 18 & \textbf{5} & \textbf{Strictly Infeasible} ($\dim = 5 > 4$) \\
+3 & $\mathcal{O}_3$ & 18 & \textbf{4} & Conditionally Feasible ($\dim = 4$) \\
+4 & $\mathcal{O}_4$ & 18 & \textbf{5} & \textbf{Strictly Infeasible} ($\dim = 5 > 4$) \\
+5 & $\mathcal{O}_5$ & 18 & \textbf{4} & Conditionally Feasible ($\dim = 4$) \\
+6 & $\mathcal{O}_6$ & 18 & \textbf{5} & \textbf{Strictly Infeasible} ($\dim = 5 > 4$) \\
+7 & $\mathcal{O}_7$ & 18 & \textbf{5} & \textbf{Strictly Infeasible} ($\dim = 5 > 4$) \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -195,7 +236,7 @@ By Lemma~\ref{lem:grassmann}, since $\dim(\pi(\operatorname{Span}(J_1, \dots, J_
 \end{theorem}
 
 \begin{proof}
-Verified by deterministic bitwise row-reduction over $\mathbb{F}_2$ across all configurations in $134.5\,\mu\mathrm{s}$.
+Verified by deterministic bitwise row-reduction over $\mathbb{F}_2$ across configurations in $134.5\,\mu\mathrm{s}$.
 \end{proof}
 
 % --------------------------------------------------------------------------
@@ -207,7 +248,7 @@ For Configurations 3 and 5 where $\dim(\pi(\operatorname{Span}(B))) = 4$, the li
 Furthermore, omitting any single term from Laderman's $5$ residual terms $\{J_0, J_1, J_2, J_3, J_4\}$ leaves a $5$-element residual coordinate syndrome:
 \begin{align}
 T_{\mathrm{res}} &= J_0 \oplus J_1 \oplus J_2 \oplus J_3 \oplus J_4 \notag \\
-&= \texttt{0x100000090000020001000}_2 \;\in\; \mathbb{F}_2^{81},
+&= \mathtt{0x100000090000020001000}_2 \;\in\; \mathbb{F}_2^{81},
 \end{align}
 which has Hamming weight $5$ across coordinates $\{24, 29, 52, 55, 80\}$. To determine whether any $4$ rank-$1$ tensors $T_1, T_2, T_3, T_4$ can satisfy:
 \begin{equation}
@@ -242,9 +283,10 @@ The empirical execution statistics of the Meet-in-the-Middle solver are summariz
 \centering
 \caption{Meet-in-the-Middle collision search statistics on the residual syndrome.}
 \label{tab:mitm}
-\begin{tabular}{lr}
+\vspace{-2mm}
+\begin{tabular}{lc}
 \toprule
-Metric & Value \\
+Metric & Recorded Value \\
 \midrule
 Total $4$-Term Combinations Explored & $4{,}207{,}934{,}255{,}625$ ($\approx 4.21 \times 10^{12}$) \\
 Direct Table Queries Executed & $2{,}051{,}325$ \\
@@ -278,9 +320,9 @@ Verified by exhaustive two-way table collision in $197.60\,\mathrm{ms}$ across a
 \section{Implementation and Reproducibility}
 % --------------------------------------------------------------------------
 
-The complete verification engine is implemented in Rust (edition 2024) in \texttt{src/flip\_graph\_tensor.rs}. It compiles cleanly with zero external scientific dependencies and operates with zero heap reallocation during core query loops:
+The complete verification engine is implemented in Rust (edition 2024) in the repository file \texttt{src/}\penalty0\texttt{flip\_graph\_tensor.rs}. It compiles cleanly with zero external dependencies and operates with zero heap reallocation during core query loops:
 
-\begin{verbatim}
+\begin{lstlisting}[language=bash]
 # Clone repository
 git clone https://github.com/darkness-38/counter-hunter.git
 cd counter-hunter
@@ -288,15 +330,15 @@ cd counter-hunter
 # Run formal test suite
 cargo test --release
 
-# Execute deterministic No-Go Theorem Prover
+# Execute deterministic No-Go Theorem Prover and MITM Collider
 RUSTFLAGS="-C target-cpu=native" \
   cargo run --release -- --target tensor-sym
-\end{verbatim}
+\end{lstlisting}
 
 The runtime characteristics on a standard 8-core CPU:
 \begin{itemize}
-    \item \textbf{Theorem~\ref{thm:grassmann-obstruction} (Grassmann Quotient Evaluation, 7 configurations):} $134.5\,\mu\mathrm{s}$
-    \item \textbf{Theorem~\ref{thm:mitm-nonexistence} (Meet-in-the-Middle Collision, $4.21 \times 10^{12}$ states):} $197.6\,\mathrm{ms}$
+    \item \textbf{Theorem~\ref{thm:grassmann-obstruction} (Grassmann Evaluation, 7 configs):} $134.5\,\mu\mathrm{s}$
+    \item \textbf{Theorem~\ref{thm:mitm-nonexistence} (MITM Collision, $4.21 \times 10^{12}$ states):} $197.6\,\mathrm{ms}$
     \item \textbf{Memory Footprint:} $28\,\mathrm{MB}$ (contiguous SIMD-aligned buffer).
 \end{itemize}
 
