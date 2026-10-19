@@ -677,10 +677,182 @@ pub fn run_sun_6family_permanent_catalog() {
     println!("\x1b[1;36m================================================================================\x1b[0m\n");
 }
 
+/// Zero-allocation 64-bit Gray-code Glynn permanent modulo p.
+/// Computes perm(matrix) mod p in O(n * 2^{n-1}) operations with zero heap allocation during step loops.
+pub fn glynn_permanent_mod_p(matrix: &[Vec<i64>], p: i64) -> i64 {
+    let n = matrix.len();
+    if n == 0 {
+        return 1;
+    }
+    if n == 1 {
+        return matrix[0][0].rem_euclid(p);
+    }
+    assert!(n <= 24, "n must be <= 24 for 64-bit Glynn Gray-code");
+
+    let p_i128 = p as i128;
+    let b = if n <= 10 {
+        0
+    } else if n <= 16 {
+        4
+    } else {
+        6
+    };
+    let num_prefixes = 1usize << b;
+    let k = n - 1 - b;
+
+    let total: i128 = (0..num_prefixes)
+        .into_par_iter()
+        .map(|prefix| {
+            let mut delta = [1i64; 24];
+            for j in 0..b {
+                if (prefix >> j) & 1 == 1 {
+                    delta[1 + j] = -1;
+                }
+            }
+
+            let mut row_sums = [0i64; 24];
+            for i in 0..n {
+                let mut sum = 0i64;
+                for j in 0..n {
+                    sum += delta[j] * matrix[i][j];
+                }
+                row_sums[i] = sum;
+            }
+
+            let mut prod_delta = 1i64;
+            for j in 0..n {
+                prod_delta *= delta[j];
+            }
+
+            let mut gray = 0u64;
+            let mut p_val = 1i128;
+            for i in 0..n {
+                let r = row_sums[i].rem_euclid(p) as i128;
+                p_val = (p_val * r) % p_i128;
+            }
+
+            let mut chunk_total = if prod_delta == 1 {
+                p_val
+            } else {
+                (p_i128 - p_val) % p_i128
+            };
+
+            for step in 1..(1u64 << k) {
+                let next_gray = step ^ (step >> 1);
+                let diff = gray ^ next_gray;
+                let bit_suffix = diff.trailing_zeros() as usize;
+                let bit = 1 + b + bit_suffix;
+
+                delta[bit] = -delta[bit];
+                prod_delta = -prod_delta;
+                let mult = 2 * delta[bit];
+
+                let mut term_prod = 1i128;
+                for i in 0..n {
+                    row_sums[i] += mult * matrix[i][bit];
+                    let r = row_sums[i].rem_euclid(p) as i128;
+                    term_prod = (term_prod * r) % p_i128;
+                }
+                gray = next_gray;
+
+                if prod_delta == 1 {
+                    chunk_total = (chunk_total + term_prod) % p_i128;
+                } else {
+                    chunk_total = (chunk_total + p_i128 - term_prod) % p_i128;
+                }
+            }
+
+            chunk_total
+        })
+        .sum::<i128>()
+        % p_i128;
+
+    let inv_2_pow = invmod_u64(powmod_u64(2, (n - 1) as u64, p as u64), p as u64) as i128;
+    let res = (total * inv_2_pow) % p_i128;
+    ((res + p_i128) % p_i128) as i64
+}
+
+/// High-speed Glynn Gray-Code solver for Zhi-Wei Sun permanent conjectures in n in [15, 23].
+pub fn run_sun_fast_glynn_benchmark() {
+    println!("\x1b[1;36m================================================================================\x1b[0m");
+    println!("\x1b[1;32m⚡ GLYNN GRAY-CODE HIGH-SPEED PERMANENT SOLVER (n in [15, 23])\x1b[0m");
+    println!("   Evaluating Zhi-Wei Sun Permanent Conjectures beyond CAS limits (O(n * 2^{{n-1}}))");
+    println!("   Method: 64-bit Gray-code Column Updates & Stack Arrays (Zero Heap Reallocation)");
+    println!("\x1b[1;36m================================================================================\x1b[0m\n");
+
+    let t0 = Instant::now();
+
+    println!(
+        "{:>3} | {:>5} | {:>9} | {:>14} | {:>14} | {:>14} | {:>14}",
+        "n", "Prime", "Time", "P1: per(j+k)", "P2: per(j^2+k^2)", "P3: per(j^2-k^2)", "P5: per(j^3+k^3)"
+    );
+    println!("{:-<95}", "");
+
+    // Dimensions n in [15, 23] mapped to primes p = 2n + 1 (or closest primes)
+    let test_cases: [(usize, u64); 9] = [
+        (15, 31),
+        (16, 37),
+        (17, 41),
+        (18, 37),
+        (19, 43),
+        (20, 41),
+        (21, 43),
+        (22, 47),
+        (23, 47),
+    ];
+
+    for &(n, p) in &test_cases {
+        let p_i64 = p as i64;
+        let t_start = Instant::now();
+
+        // 1. P1: [(j + k) / p]
+        let mat1: Vec<Vec<i64>> = (1..=n)
+            .map(|j| (1..=n).map(|k| legendre((j + k) as i64, p_i64)).collect())
+            .collect();
+        let p1 = glynn_permanent_mod_p(&mat1, p_i64);
+
+        // 2. P2: [(j^2 + k^2) / p]
+        let mat2: Vec<Vec<i64>> = (1..=n)
+            .map(|j| (1..=n).map(|k| legendre((j * j + k * k) as i64, p_i64)).collect())
+            .collect();
+        let p2 = glynn_permanent_mod_p(&mat2, p_i64);
+
+        // 3. P3: [(j^2 - k^2) / p]
+        let mat3: Vec<Vec<i64>> = (1..=n)
+            .map(|j| (1..=n).map(|k| legendre((j * j) as i64 - (k * k) as i64, p_i64)).collect())
+            .collect();
+        let p3 = glynn_permanent_mod_p(&mat3, p_i64);
+
+        // 4. P5: [(j^3 + k^3) / p]
+        let mat5: Vec<Vec<i64>> = (1..=n)
+            .map(|j| (1..=n).map(|k| legendre((j * j * j + k * k * k) as i64, p_i64)).collect())
+            .collect();
+        let p5 = glynn_permanent_mod_p(&mat5, p_i64);
+
+        let elapsed = t_start.elapsed();
+        println!(
+            "{:>3} | {:>5} | {:>9.2?} | {:>14} | {:>14} | {:>14} | {:>14}",
+            n, p, elapsed, p1, p2, p3, p5
+        );
+
+        // Verify known cubic symmetry: if p = 2 mod 3, P_5 vanishes identically
+        if p % 3 == 2 && p5 == 0 {
+            println!("    ✓ Cubing symmetry verified: P_5 = 0 mod {}", p);
+        }
+        // Verify P_2 == P_3 mod p for p = 1 mod 4 when n = (p-1)/2
+        if p % 4 == 1 && n == ((p - 1) / 2) as usize {
+            assert_eq!(p2, p3, "P_2 must equal P_3 for p = 1 mod 4");
+            println!("    ✓ Quadratic symmetry verified: P_2 == P_3 = {} mod {}", p2, p);
+        }
+    }
+
+    println!("--------------------------------------------------------------------------------");
+    println!("🏁 [GLYNN PERMANENT BENCHMARK COMPLETED] All 9 matrix dimensions n in [15, 23] solved in {:.2?}", t0.elapsed());
+    println!("================================================================================\n");
+}
+
 pub fn run_sun_permanent_catalog_master() {
-    run_higher_composite_trig_verification();
-    run_sun_prime_sign_hunt();
-    run_sun_6family_permanent_catalog();
+    run_sun_fast_glynn_benchmark();
 }
 
 #[cfg(test)]
@@ -747,4 +919,37 @@ mod tests {
         assert_eq!(s_exact.rem_euclid(2), 1, "s_53 must be odd!");
         assert_eq!(s_exact.rem_euclid(p as i128), (p - 1) as i128, "s_53 = -1 mod 53");
     }
+
+    #[test]
+    fn test_glynn_permanent_mod_p() {
+        let p = 97i64;
+
+        // Identity 3x3: perm = 1
+        let eye3 = vec![
+            vec![1, 0, 0],
+            vec![0, 1, 0],
+            vec![0, 0, 1],
+        ];
+        assert_eq!(glynn_permanent_mod_p(&eye3, p), 1);
+
+        // All-ones 4x4: perm = 4! = 24
+        let ones4 = vec![vec![1; 4]; 4];
+        assert_eq!(glynn_permanent_mod_p(&ones4, p), 24);
+
+        // General 3x3: perm = 450 = 62 mod 97
+        let m3 = vec![
+            vec![1, 2, 3],
+            vec![4, 5, 6],
+            vec![7, 8, 9],
+        ];
+        assert_eq!(glynn_permanent_mod_p(&m3, p), 450 % p);
+
+        // 2x2 with negative entries: perm([-1, 2], [3, 4]) = -4 + 6 = 2
+        let m2 = vec![
+            vec![-1, 2],
+            vec![3, 4],
+        ];
+        assert_eq!(glynn_permanent_mod_p(&m2, p), 2);
+    }
 }
+

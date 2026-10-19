@@ -229,6 +229,7 @@ fn main() {
         }
         "tensor-sym" | "tensor-symmetric" | "sym-tensor" | "rank22" | "rank-22" | "no-go" | "mitm" => {
             counter_hunter::flip_graph_tensor::prove_laderman_orbit_impossibility();
+            counter_hunter::flip_graph_tensor::prove_global_z3xz3_orbit_impossibility();
             counter_hunter::flip_graph_tensor::meet_in_the_middle_rank22_collider(0);
         }
         "zarankiewicz" | "c4-free" | "k22" | "k33" | "zarankiewicz-hunter" => {
